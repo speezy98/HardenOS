@@ -1,0 +1,222 @@
+/* =============================================================
+   HardenOS — Design tokens
+
+   Tokens SÉMANTIQUES : nommés par rôle (--bg-surface, --status-fail…),
+   jamais par valeur. Deux jeux de couleurs :
+     - sombre (défaut, identité historique)
+     - clair (data-theme="light" sur <html>, géré par stores/ui.js)
+
+   RÈGLE : les composants ne consomment QUE ces tokens.
+   Aucune couleur codée en dur dans les .vue.
+   ============================================================= */
+
+/* ---------- Constantes indépendantes du thème ---------- */
+:root {
+  /* Typography */
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-ui: 'Space Grotesk', sans-serif;
+
+  /* Text Sizes */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+
+  /* Spacing */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 1.75rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+
+  /* Border Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  --transition-base: 250ms ease;
+}
+
+/* =============================================================
+   Identité HardenOS : bleu profond (marque) + ambre (action).
+   - --accent        : bleu de marque (liens, menu actif, focus, bouton primaire)
+   - --accent-action : ambre chaud, mise en avant secondaire (parcimonie)
+   - --status-*/--risk-* : conventions sécurité, teintes SOBRES et réservées
+
+   Les DEUX thèmes partagent la MÊME identité coloriée (même bleu, même ambre,
+   mêmes statuts). Seuls diffèrent :
+     - la clarté du fond (noir profond en sombre / gris froids en clair)
+     - un ajustement mineur de luminosité des accents pour rester lisibles.
+   Un utilisateur qui bascule reconnaît immédiatement la même application.
+   ============================================================= */
+
+/* =============================================================
+   THÈME CLAIR = DÉFAUT (base unique de tous les tokens de couleur)
+
+   Un SEUL jeu complet de tokens, sur :root. C'est le thème clair, appliqué
+   par défaut au premier chargement (avec ou sans attribut data-theme).
+   ============================================================= */
+:root {
+  color-scheme: light;
+
+  /* Backgrounds — gris froids doux, cohérents avec le bleu de marque */
+  --bg-base: #f2f4f8;
+  --bg-surface: #ffffff;
+  --bg-elevated: #eaeef4;
+
+  /* Borders */
+  --border: #d3dae4;
+  --border-subtle: #e6eaf0;
+
+  /* Text */
+  --text-primary: #1a2130;
+  --text-secondary: #4c586b;
+  --text-muted: #68727f;
+
+  /* Accent MARQUE (bleu profond) — soutenu et lisible sur fond clair */
+  --accent: #2456c8;
+  --accent-hover: #1d489e;
+  --accent-dim: rgba(36, 86, 200, 0.1);
+  --accent-contrast: #ffffff;
+  --rgb-accent: 36, 86, 200;
+
+  /* Accent ACTION (ambre) */
+  --accent-action: #b5590a;
+  --accent-action-hover: #99490a;
+  --accent-action-dim: rgba(181, 89, 10, 0.1);
+  --rgb-accent-action: 181, 89, 10;
+
+  /* Status */
+  --status-pass: #1f7a3d;
+  --status-fail: #cf2733;
+  --status-warn: #9a6a00;
+  --status-na: #6e7885;
+
+  --rgb-status-pass: 31, 122, 61;
+  --rgb-status-fail: 207, 39, 51;
+  --rgb-status-warn: 154, 106, 0;
+  --rgb-status-na: 110, 120, 133;
+
+  /* Risk Levels */
+  --risk-low: #1f7a3d;
+  --risk-moderate: #9a6a00;
+  --risk-high: #b3510a;
+  --risk-critical: #cf2733;
+
+  --rgb-risk-low: 31, 122, 61;
+  --rgb-risk-moderate: 154, 106, 0;
+  --rgb-risk-high: 179, 81, 10;
+  --rgb-risk-critical: 207, 39, 51;
+
+  /* Roles utilisateurs */
+  --role-admin: #2456c8;
+  --role-auditor: #0e7490;
+  --role-readonly: #4c586b;
+
+  --rgb-role-admin: 36, 86, 200;
+  --rgb-role-auditor: 14, 116, 144;
+  --rgb-role-readonly: 76, 88, 107;
+
+  /* Voile des modales */
+  --overlay: rgba(20, 27, 41, 0.42);
+
+  /* Shadows — douces, teintées bleu-nuit plutôt que noires */
+  --shadow-sm: 0 1px 2px rgba(20, 27, 41, 0.08);
+  --shadow-md: 0 4px 8px rgba(20, 27, 41, 0.1);
+  --shadow-lg: 0 10px 18px rgba(20, 27, 41, 0.14);
+}
+
+/* =============================================================
+   THÈME SOMBRE = MÊME IDENTITÉ, ADAPTÉE AU FOND NOIR
+
+   Le sombre reprend l'identité du clair (bleu de marque + ambre d'action +
+   statuts sobres) mais chaque teinte est ÉCLAIRCIE ce qu'il faut pour rester
+   lisible et vive sur le fond noir #0a0c10 (les valeurs claires, pensées pour
+   du blanc, y manquaient de contraste — le bleu #2456c8 tombait à 2.77:1).
+   MÊME teinte perçue, luminosité ajustée : on reconnaît la même app en basculant.
+
+   PLACÉ EN DERNIER + sélecteur html[data-theme='dark'] : gagne la cascade de
+   façon garantie. Aucune règle claire ne peut l'écraser.
+   ============================================================= */
+html[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* Fond — quasi-noir neutre ; surfaces un cran au-dessus pour la profondeur */
+  --bg-base: #0a0c10;
+  --bg-surface: #14171d;
+  --bg-elevated: #1e222b;
+
+  /* Bordures — SOMBRES et discrètes (les valeurs claires héritées étaient des
+     filets quasi-blancs à 13:1, beaucoup trop lumineux sur le noir) */
+  --border: #2b303b;
+  --border-subtle: #20242d;
+
+  /* Texte — clair et lisible sur le fond sombre */
+  --text-primary: #e6edf3;
+  --text-secondary: #a2acbd;
+  --text-muted: #7d8797;
+
+  /* Accent MARQUE (bleu) — MÊME bleu que le clair (#2456c8), éclairci pour
+     ressortir sur le noir. Le bouton primaire pose --accent-contrast (sombre). */
+  --accent: #4d82e8;
+  --accent-hover: #6d99ee;
+  --accent-dim: rgba(77, 130, 232, 0.16);
+  --accent-contrast: #0a0c10;
+  --rgb-accent: 77, 130, 232;
+
+  /* Accent ACTION (ambre) — même ambre chaleureux, éclairci (le #b5590a du
+     clair devenait terne sur le noir) */
+  --accent-action: #eb8a2e;
+  --accent-action-hover: #f2a251;
+  --accent-action-dim: rgba(235, 138, 46, 0.16);
+  --rgb-accent-action: 235, 138, 46;
+
+  /* Status — mêmes teintes conventionnelles, éclaircies pour le noir */
+  --status-pass: #3fb765;
+  --status-fail: #f2564d;
+  --status-warn: #e0a52e;
+  --status-na: #7d8797;
+
+  --rgb-status-pass: 63, 183, 101;
+  --rgb-status-fail: 242, 86, 77;
+  --rgb-status-warn: 224, 165, 46;
+  --rgb-status-na: 125, 135, 151;
+
+  /* Risk Levels — mêmes teintes, éclaircies (vert → orange → rouge) */
+  --risk-low: #3fb765;
+  --risk-moderate: #e0a52e;
+  --risk-high: #ee8b43;
+  --risk-critical: #f2564d;
+
+  --rgb-risk-low: 63, 183, 101;
+  --rgb-risk-moderate: 224, 165, 46;
+  --rgb-risk-high: 238, 139, 67;
+  --rgb-risk-critical: 242, 86, 77;
+
+  /* Roles utilisateurs — dérivés des accents éclaircis */
+  --role-admin: #4d82e8;
+  --role-auditor: #2bb3cf;
+  --role-readonly: #a2acbd;
+
+  --rgb-role-admin: 77, 130, 232;
+  --rgb-role-auditor: 43, 179, 207;
+  --rgb-role-readonly: 162, 172, 189;
+
+  /* Voile des modales — noir translucide sur fond sombre */
+  --overlay: rgba(0, 0, 0, 0.7);
+
+  /* Shadows — plus profondes sur le noir */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.6);
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.65);
+  --shadow-lg: 0 10px 22px rgba(0, 0, 0, 0.7);
+}
