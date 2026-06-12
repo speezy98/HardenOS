@@ -1,0 +1,2365 @@
+# CIS Debian Linux 13 — 100 contrôles sélectionnés pour HardenOS.
+# Généré depuis SELECTION_CIS_Debian13.md. Ne pas éditer à la main.
+benchmark:
+  os_type: linux
+  os_family: debian
+  os_version: Debian 13
+  source: CIS Debian Linux 13 Benchmark v1.0.0
+  package_manager: apt
+controls:
+- control_id: '5.1.21'
+  check_type: comparison
+  title: Ensure sshd PermitRootLogin is disabled
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 5
+  impact: critical
+  description: Interdire la connexion SSH directe en root force l'usage de comptes nominatifs puis l'élévation de privilèges, garantissant la traçabilité et réduisant la valeur d'un mot de passe root compromis.
+  audit:
+    command: sshd -T | grep permitrootlogin
+    expected: permitrootlogin no
+    condition: Doit valoir no
+  remediation:
+    type: bash
+    script: |-
+      sed -i -E '/^[[:space:]]*#*[[:space:]]*PermitRootLogin[[:space:]]/Id' /etc/ssh/sshd_config
+      echo 'PermitRootLogin no' >> /etc/ssh/sshd_config
+  threat:
+    attack_technique: T1021.004
+    attack_name: 'Remote Services: SSH'
+    cve: null
+    cvss: null
+    description: Empêche l'accès distant direct au compte le plus privilégié via SSH, limitant les mouvements latéraux et l'accès initial par identifiants root compromis.
+- control_id: '5.1.20'
+  check_type: comparison
+  title: Ensure sshd PermitEmptyPasswords is disabled
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 5
+  impact: critical
+  description: Autoriser les mots de passe vides en SSH permettrait de se connecter à un compte sans aucun secret, une faille d'authentification majeure.
+  audit:
+    command: sshd -T | grep permitemptypasswords
+    expected: permitemptypasswords no
+    condition: Doit valoir no
+  remediation:
+    type: bash
+    script: |-
+      sed -i -E '/^[[:space:]]*#*[[:space:]]*PermitEmptyPasswords[[:space:]]/Id' /etc/ssh/sshd_config
+      echo 'PermitEmptyPasswords no' >> /etc/ssh/sshd_config
+  threat:
+    attack_technique: T1078
+    attack_name: Valid Accounts
+    cve: null
+    cvss: null
+    description: Bloque l'accès à des comptes dépourvus de mot de passe, vecteur d'accès non authentifié.
+- control_id: '5.4.2.1'
+  check_type: comparison
+  title: Ensure root is the only UID 0 account
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 5
+  impact: critical
+  description: Seul le compte root doit avoir l'UID 0. Tout autre compte avec UID 0 disposerait silencieusement des pleins pouvoirs système.
+  audit:
+    command: 'awk -F: ''($3 == 0) { print $1 }'' /etc/passwd'
+    expected: root
+    condition: La sortie ne doit contenir que root
+  remediation:
+    type: bash
+    script: '# Supprimer ou corriger tout compte non-root ayant l''UID 0'
+  threat:
+    attack_technique: T1078.003
+    attack_name: 'Valid Accounts: Local Accounts'
+    cve: null
+    cvss: null
+    description: Détecte les comptes portes dérobées à privilèges root, technique de persistance et d'élévation.
+- control_id: '5.2.4'
+  check_type: absence
+  title: Ensure users must provide password for escalation
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Exiger un mot de passe pour sudo empêche une élévation silencieuse si un compte standard est compromis.
+  audit:
+    command: grep -rP -- '^\h*[^#].*NOPASSWD' /etc/sudoers /etc/sudoers.d/
+    expected: null
+    condition: Aucune entrée NOPASSWD ne doit être présente
+  remediation:
+    type: bash
+    script: '# Retirer toutes les occurrences de NOPASSWD dans /etc/sudoers et /etc/sudoers.d/'
+  threat:
+    attack_technique: T1548.003
+    attack_name: 'Abuse Elevation Control Mechanism: Sudo and Sudo Caching'
+    cve: null
+    cvss: null
+    description: Empêche l'élévation de privilèges sans réauthentification, exploitée après compromission d'un compte.
+- control_id: '5.2.1'
+  check_type: presence
+  title: Ensure sudo is installed
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: sudo permet une élévation de privilèges contrôlée et traçable, préférable à l'usage direct de root. Maintenir une version à jour évite des failles d'élévation connues.
+  audit:
+    command: dpkg-query -s sudo 2>/dev/null | grep -Pi 'install ok installed'
+    expected: null
+    condition: Le paquet sudo doit être installé
+  remediation:
+    type: bash
+    script: apt install sudo
+  threat:
+    attack_technique: T1548.003
+    attack_name: 'Abuse Elevation Control Mechanism: Sudo and Sudo Caching'
+    cve: CVE-2021-3156
+    cvss: 7.8
+    description: Le contrôle de sudo et de sa version est lié à des failles d'élévation locale majeures comme Baron Samedit (CVE-2021-3156, CVSS 7.8), débordement de tampon permettant à tout utilisateur local de devenir root.
+- control_id: '5.3.3.1.1'
+  check_type: presence
+  title: Ensure password failed attempts lockout is configured
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Définir un seuil de tentatives échouées avant verrouillage protège contre les attaques par force brute sur les mots de passe.
+  audit:
+    command: grep -P '^\h*deny\h*=' /etc/security/faillock.conf
+    expected: null
+    condition: deny doit être inférieur ou égal à 5
+  remediation:
+    type: bash
+    script: echo 'deny = 5' >> /etc/security/faillock.conf
+  threat:
+    attack_technique: T1110.001
+    attack_name: 'Brute Force: Password Guessing'
+    cve: null
+    cvss: null
+    description: Le verrouillage après échecs répétés neutralise les attaques par devinette de mot de passe.
+- control_id: '5.3.2.2-faillock'
+  check_type: presence
+  title: Ensure pam_faillock module is enabled
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: pam_faillock verrouille un compte après plusieurs échecs d'authentification, contrant les attaques par force brute au niveau PAM.
+  audit:
+    command: grep -P 'pam_faillock\.so' /etc/pam.d/common-auth
+    expected: null
+    condition: Le module pam_faillock doit être activé dans la configuration PAM
+  remediation:
+    type: bash
+    script: '# Configurer pam_faillock dans /etc/pam.d/common-auth et common-account'
+  threat:
+    attack_technique: T1110
+    attack_name: Brute Force
+    cve: null
+    cvss: null
+    description: Applique le verrouillage de compte au niveau du système d'authentification PAM contre la force brute.
+- control_id: '5.3.3.2.2'
+  check_type: presence
+  title: Ensure password length is configured
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Imposer une longueur minimale de 14 caractères augmente fortement la résistance aux attaques par devinette et par force brute hors ligne.
+  audit:
+    command: grep -P '^\h*minlen\h*=' /etc/security/pwquality.conf
+    expected: null
+    condition: minlen doit être supérieur ou égal à 14
+  remediation:
+    type: bash
+    script: echo 'minlen = 14' >> /etc/security/pwquality.conf
+  threat:
+    attack_technique: T1110.002
+    attack_name: 'Brute Force: Password Cracking'
+    cve: null
+    cvss: null
+    description: Des mots de passe longs résistent au cassage hors ligne d'empreintes dérobées.
+- control_id: '5.1.17'
+  check_type: comparison
+  title: Ensure sshd MaxAuthTries is configured
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Limiter le nombre de tentatives d'authentification par connexion freine les attaques par force brute via SSH.
+  audit:
+    command: sshd -T | grep maxauthtries
+    expected: maxauthtries 4
+    condition: La valeur doit être inférieure ou égale à 4
+  remediation:
+    type: bash
+    script: |-
+      sed -i -E '/^[[:space:]]*#*[[:space:]]*MaxAuthTries[[:space:]]/Id' /etc/ssh/sshd_config
+      echo 'MaxAuthTries 4' >> /etc/ssh/sshd_config
+  threat:
+    attack_technique: T1110.001
+    attack_name: 'Brute Force: Password Guessing'
+    cve: null
+    cvss: null
+    description: Réduit le nombre d'essais d'authentification par session SSH, limitant la force brute en ligne.
+- control_id: '5.4.1.4'
+  check_type: presence
+  title: Ensure strong password hashing algorithm is configured
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Configurer ENCRYPT_METHOD sur un algorithme fort (yescrypt ou sha512) assure que les nouveaux mots de passe sont stockés de façon robuste contre le cassage.
+  audit:
+    command: grep -Pi '^\h*ENCRYPT_METHOD\h+(SHA512|YESCRYPT)\b' /etc/login.defs
+    expected: null
+    condition: ENCRYPT_METHOD doit être YESCRYPT ou SHA512
+  remediation:
+    type: bash
+    script: sed -i 's/^ENCRYPT_METHOD.*/ENCRYPT_METHOD YESCRYPT/' /etc/login.defs
+  threat:
+    attack_technique: T1003.008
+    attack_name: 'OS Credential Dumping: /etc/passwd and /etc/shadow'
+    cve: null
+    cvss: null
+    description: Un hachage fort des mots de passe rend inexploitable le vol du fichier shadow.
+- control_id: '5.1.1'
+  check_type: comparison
+  title: Ensure permissions on /etc/ssh/sshd_config are configured
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Le fichier sshd_config contrôle la configuration du serveur SSH et doit être protégé en écriture, accessible uniquement à root.
+  audit:
+    command: stat -Lc '%a %u %g' /etc/ssh/sshd_config
+    expected: 600 0 0
+    condition: Permissions 600 ou plus restrictif, propriétaire et groupe root
+  remediation:
+    type: bash
+    script: chmod u-x,go-rwx /etc/ssh/sshd_config; chown root:root /etc/ssh/sshd_config
+  threat:
+    attack_technique: T1098.004
+    attack_name: 'Account Manipulation: SSH Authorized Keys'
+    cve: null
+    cvss: null
+    description: Empêche la modification non autorisée de la configuration SSH pour y introduire une porte dérobée.
+- control_id: '5.1.2'
+  # presence-as-configured : vérifie que les clés existent et sont listées ;
+  # la validation fine des permissions (600/root) relève d'une passe ultérieure.
+  check_type: presence
+  title: Ensure permissions on SSH private host key files are configured
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Les clés privées d'hôte SSH authentifient le serveur ; leur lecture par un tiers permettrait d'usurper l'identité du serveur.
+  audit:
+    command: find /etc/ssh -xdev -type f -name 'ssh_host_*_key' -exec stat -Lc '%n %a %U %G' {} +
+    expected: null
+    condition: Chaque clé privée en 600 ou plus restrictif, propriétaire root
+  remediation:
+    type: bash
+    script: find /etc/ssh -xdev -type f -name 'ssh_host_*_key' -exec chmod 600 {} +; find /etc/ssh -xdev -type f -name 'ssh_host_*_key' -exec chown root:root {} +
+  threat:
+    attack_technique: T1563.001
+    attack_name: 'Remote Service Session Hijacking: SSH Hijacking'
+    cve: null
+    cvss: null
+    description: Protège les clés d'hôte dont le vol permettrait des attaques de l'homme du milieu sur SSH.
+- control_id: '5.1.22'
+  check_type: comparison
+  title: Ensure sshd PermitUserEnvironment is disabled
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Permettre aux utilisateurs de définir des variables d'environnement via SSH peut servir à contourner des restrictions ou détourner l'exécution.
+  audit:
+    command: sshd -T | grep permituserenvironment
+    expected: permituserenvironment no
+    condition: Doit valoir no
+  remediation:
+    type: bash
+    script: |-
+      sed -i -E '/^[[:space:]]*#*[[:space:]]*PermitUserEnvironment[[:space:]]/Id' /etc/ssh/sshd_config
+      echo 'PermitUserEnvironment no' >> /etc/ssh/sshd_config
+  threat:
+    attack_technique: T1574.006
+    attack_name: 'Hijack Execution Flow: Dynamic Linker Hijacking'
+    cve: null
+    cvss: null
+    description: Empêche l'injection de variables d'environnement détournant l'exécution lors d'une session SSH.
+- control_id: '5.1.10'
+  check_type: comparison
+  title: Ensure sshd HostbasedAuthentication is disabled
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: L'authentification basée sur l'hôte fait confiance à des machines entières plutôt qu'à des utilisateurs, ce qui est risqué en cas de compromission d'un hôte de confiance.
+  audit:
+    command: sshd -T | grep hostbasedauthentication
+    expected: hostbasedauthentication no
+    condition: Doit valoir no
+  remediation:
+    type: bash
+    script: |-
+      sed -i -E '/^[[:space:]]*#*[[:space:]]*HostbasedAuthentication[[:space:]]/Id' /etc/ssh/sshd_config
+      echo 'HostbasedAuthentication no' >> /etc/ssh/sshd_config
+  threat:
+    attack_technique: T1078
+    attack_name: Valid Accounts
+    cve: null
+    cvss: null
+    description: Empêche l'abus de relations de confiance entre hôtes pour un accès non authentifié.
+- control_id: '5.1.11'
+  check_type: comparison
+  title: Ensure sshd IgnoreRhosts is enabled
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: IgnoreRhosts désactive les anciens fichiers .rhosts qui permettaient une authentification non sécurisée par confiance d'hôte.
+  audit:
+    command: sshd -T | grep ignorerhosts
+    expected: ignorerhosts yes
+    condition: Doit valoir yes
+  remediation:
+    type: bash
+    script: |-
+      sed -i -E '/^[[:space:]]*#*[[:space:]]*IgnoreRhosts[[:space:]]/Id' /etc/ssh/sshd_config
+      echo 'IgnoreRhosts yes' >> /etc/ssh/sshd_config
+  threat:
+    attack_technique: T1078
+    attack_name: Valid Accounts
+    cve: null
+    cvss: null
+    description: Neutralise un mécanisme d'authentification hérité contournant les contrôles d'identité.
+- control_id: '5.2.7'
+  check_type: presence
+  title: Ensure access to the su command is restricted
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Restreindre la commande su à un groupe précis via pam_wheel limite quels comptes peuvent tenter de devenir root.
+  audit:
+    command: grep -Pi '^\h*auth\h+(required|requisite)\h+pam_wheel\.so' /etc/pam.d/su
+    expected: null
+    condition: pam_wheel.so avec use_uid et un groupe défini doit être configuré
+  remediation:
+    type: bash
+    script: echo 'auth required pam_wheel.so use_uid group=sugroup' >> /etc/pam.d/su
+  threat:
+    attack_technique: T1548.003
+    attack_name: 'Abuse Elevation Control Mechanism: Sudo and Sudo Caching'
+    cve: null
+    cvss: null
+    description: Limite quels utilisateurs peuvent basculer vers root, réduisant les voies d'élévation.
+- control_id: '5.3.3.2.2-dict'
+  check_type: comparison
+  title: Ensure password dictionary check is configured
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Vérifier les mots de passe contre un dictionnaire empêche le choix de mots de passe courants triviaux à deviner.
+  audit:
+    # Émet une valeur canonique comparable : 'dictcheck=1' si (et seulement si)
+    # la valeur exacte 1 est configurée (borne \b -> pas de faux positif sur 10),
+    # sinon 'dictcheck non conforme'. Le comparateur "contient" est ainsi fiable.
+    command: grep -qP '^\h*dictcheck\h*=\h*1\b' /etc/security/pwquality.conf 2>/dev/null && echo 'dictcheck=1' || echo 'dictcheck non conforme'
+    expected: dictcheck=1
+    condition: dictcheck doit valoir 1
+  remediation:
+    type: bash
+    script: echo 'dictcheck = 1' >> /etc/security/pwquality.conf
+  threat:
+    attack_technique: T1110.001
+    attack_name: 'Brute Force: Password Guessing'
+    cve: null
+    cvss: null
+    description: Bloque les mots de passe figurant dans les dictionnaires d'attaque courants.
+- control_id: '5.4.1.1'
+  check_type: presence
+  title: Ensure password expiration is configured
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Forcer l'expiration périodique des mots de passe limite la durée pendant laquelle un secret compromis reste exploitable.
+  audit:
+    command: grep -P '^\h*PASS_MAX_DAYS' /etc/login.defs
+    expected: null
+    condition: PASS_MAX_DAYS doit être inférieur ou égal à 365
+  remediation:
+    type: bash
+    script: sed -i 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS 365/' /etc/login.defs
+  threat:
+    attack_technique: T1078
+    attack_name: Valid Accounts
+    cve: null
+    cvss: null
+    description: Réduit la fenêtre d'usage d'identifiants valides dérobés.
+- control_id: '5.1.7'
+  # presence-as-configured : vérifie que les directives sont définies ; la
+  # validation de la plage (interval 1-15, countmax <= 3) relève d'une passe ultérieure.
+  check_type: presence
+  title: Ensure sshd ClientAliveInterval and ClientAliveCountMax are configured
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Ces paramètres ferment automatiquement les sessions SSH inactives, réduisant le risque qu'une session abandonnée soit détournée.
+  audit:
+    command: sshd -T | grep -E 'clientaliveinterval|clientalivecountmax'
+    expected: null
+    condition: ClientAliveInterval entre 1 et 15, ClientAliveCountMax inférieur ou égal à 3
+  remediation:
+    type: bash
+    script: |-
+      sed -i -E '/^[[:space:]]*#*[[:space:]]*ClientAlive(Interval|CountMax)[[:space:]]/Id' /etc/ssh/sshd_config
+      printf 'ClientAliveInterval 15\nClientAliveCountMax 3\n' >> /etc/ssh/sshd_config
+  threat:
+    attack_technique: T1563.001
+    attack_name: 'Remote Service Session Hijacking: SSH Hijacking'
+    cve: null
+    cvss: null
+    description: Limite l'exposition des sessions SSH inactives au détournement.
+- control_id: '5.2.2'
+  check_type: presence
+  title: Ensure sudo commands use pty
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Forcer l'usage d'un pseudo-terminal pour sudo empêche certaines attaques par détournement de processus exécutés via sudo.
+  audit:
+    command: grep -rPi -- '^\h*Defaults\h+([^#\n\r]+,)?use_pty\b' /etc/sudoers /etc/sudoers.d/
+    expected: null
+    condition: La directive Defaults use_pty doit être présente
+  remediation:
+    type: bash
+    script: echo 'Defaults use_pty' >> /etc/sudoers.d/use_pty
+  threat:
+    attack_technique: T1548.003
+    attack_name: 'Abuse Elevation Control Mechanism: Sudo and Sudo Caching'
+    cve: null
+    cvss: null
+    description: Empêche le détournement de processus enfant lors d'une exécution sudo.
+- control_id: '5.2.3'
+  check_type: presence
+  title: Ensure sudo log file exists
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Journaliser les commandes sudo dans un fichier dédié assure la traçabilité des élévations de privilèges pour l'investigation.
+  audit:
+    command: grep -rPsi -- '^\h*Defaults\h+([^#]+,\h*)?logfile\h*=' /etc/sudoers /etc/sudoers.d/
+    expected: null
+    condition: Une directive Defaults logfile doit être définie
+  remediation:
+    type: bash
+    script: echo 'Defaults logfile="/var/log/sudo.log"' >> /etc/sudoers.d/logfile
+  threat:
+    attack_technique: T1548.003
+    attack_name: 'Abuse Elevation Control Mechanism: Sudo and Sudo Caching'
+    cve: null
+    cvss: null
+    description: Trace les élévations de privilèges pour détecter les abus de sudo.
+- control_id: '1.4.1'
+  check_type: presence
+  title: Ensure bootloader password is set
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Protéger le chargeur de démarrage GRUB par mot de passe empêche la modification des paramètres de boot par un accès physique (mode single user).
+  audit:
+    command: grep -P '^\h*(set superusers|password)' /boot/grub/grub.cfg
+    expected: null
+    condition: Un superuser et un mot de passe GRUB doivent être définis
+  remediation:
+    type: bash
+    script: '# Définir un superuser et un mot de passe via grub-mkpasswd-pbkdf2 puis update-grub'
+  threat:
+    attack_technique: T1542
+    attack_name: Pre-OS Boot
+    cve: null
+    cvss: null
+    description: Empêche le contournement de l'authentification via modification des paramètres de démarrage.
+- control_id: '1.4.2'
+  check_type: comparison
+  title: Ensure access to bootloader config is configured
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Protéger le fichier de configuration GRUB en lecture/écriture empêche la fuite ou l'altération des paramètres de boot et du hash du mot de passe GRUB.
+  audit:
+    command: stat -Lc '%a %u %g' /boot/grub/grub.cfg
+    expected: 600 0 0
+    condition: Permissions 600 ou plus restrictif, propriétaire root
+  remediation:
+    type: bash
+    script: chown root:root /boot/grub/grub.cfg; chmod u-wx,go-rwx /boot/grub/grub.cfg
+  threat:
+    attack_technique: T1542
+    attack_name: Pre-OS Boot
+    cve: null
+    cvss: null
+    description: Protège la configuration de démarrage contre la lecture et l'altération.
+- control_id: '5.4.3.2'
+  check_type: presence
+  title: Ensure default user shell timeout is configured
+  domain: access
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Définir un délai d'inactivité du shell déconnecte les sessions oubliées, réduisant le risque d'exploitation d'une session laissée ouverte.
+  audit:
+    command: grep -rPs '^\h*(readonly\h+)?(export\h+)?TMOUT\b' /etc/profile /etc/profile.d/*.sh /etc/bash.bashrc
+    expected: null
+    condition: TMOUT doit être inférieur ou égal à 900 secondes
+  remediation:
+    type: bash
+    script: echo 'readonly TMOUT=900 ; export TMOUT' >> /etc/profile.d/tmout.sh
+  threat:
+    attack_technique: T1078
+    attack_name: Valid Accounts
+    cve: null
+    cvss: null
+    description: Ferme les sessions inactives, limitant le détournement d'une session authentifiée abandonnee.
+- control_id: '4.1.2'
+  check_type: presence
+  title: Ensure ufw service is enabled and active
+  domain: network
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 5
+  impact: critical
+  description: Le pare-feu doit être actif et activé au démarrage pour filtrer le trafic réseau en continu, première ligne de défense de l'hôte.
+  audit:
+    command: 'systemctl is-enabled ufw.service; ufw status | grep -i ''Status: active'''
+    expected: null
+    condition: ufw doit être enabled et son statut actif
+  remediation:
+    type: bash
+    script: |-
+      apt install ufw
+      ufw allow 22/tcp
+      ufw --force enable
+      systemctl enable ufw.service
+  threat:
+    attack_technique: T1190
+    attack_name: Exploit Public-Facing Application
+    cve: null
+    cvss: null
+    description: Un pare-feu actif limite l'exposition des services aux attaques réseau entrantes.
+- control_id: '4.1.1'
+  check_type: presence
+  title: Ensure ufw is installed
+  domain: network
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Un pare-feu (ufw) est indispensable pour contrôler le trafic réseau de l'hôte et doit être présent.
+  audit:
+    command: dpkg-query -s ufw 2>/dev/null | grep -Pi 'install ok installed'
+    expected: null
+    condition: Le paquet ufw doit être installé
+  remediation:
+    type: bash
+    script: apt install ufw
+  threat:
+    attack_technique: T1190
+    attack_name: Exploit Public-Facing Application
+    cve: null
+    cvss: null
+    description: La présence d'un pare-feu est le prérequis au filtrage du trafic entrant malveillant.
+- control_id: '4.1.3'
+  check_type: presence
+  title: Ensure ufw default deny incoming policy is configured
+  domain: network
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: La politique par défaut sur le trafic entrant doit refuser tout ce qui n'est pas explicitement autorisé, appliquant le moindre privilège réseau.
+  audit:
+    command: ufw status verbose | grep -i 'Default:'
+    expected: null
+    condition: La politique par défaut entrante doit être deny ou reject
+  remediation:
+    type: bash
+    script: ufw default deny incoming
+  threat:
+    attack_technique: T1190
+    attack_name: Exploit Public-Facing Application
+    cve: null
+    cvss: null
+    description: Bloque par défaut les connexions entrantes non sollicitées vers des services exposés.
+- control_id: '3.3.1.1'
+  check_type: comparison
+  title: Ensure net.ipv4.ip_forward is configured
+  domain: network
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Désactiver le routage IP sur une machine qui n'est pas un routeur empêche le transit de trafic non désiré à travers l'hôte.
+  audit:
+    command: sysctl net.ipv4.ip_forward
+    expected: net.ipv4.ip_forward = 0
+    condition: Doit valoir 0 sauf si la machine est un routeur
+  remediation:
+    type: bash
+    script: echo 'net.ipv4.ip_forward = 0' >> /etc/sysctl.d/60-netipv4.conf; sysctl -w net.ipv4.ip_forward=0
+  threat:
+    attack_technique: T1090
+    attack_name: Proxy
+    cve: null
+    cvss: null
+    description: Empêche l'usage de l'hôte comme relais pour faire transiter du trafic d'attaque.
+- control_id: '3.3.1.8'
+  check_type: comparison
+  title: Ensure net.ipv4.conf.all.accept_redirects is configured
+  domain: network
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Refuser les redirections ICMP entrantes empêche un attaquant de manipuler la table de routage de la machine.
+  audit:
+    command: sysctl net.ipv4.conf.all.accept_redirects
+    expected: net.ipv4.conf.all.accept_redirects = 0
+    condition: Doit valoir 0
+  remediation:
+    type: bash
+    script: echo 'net.ipv4.conf.all.accept_redirects = 0' >> /etc/sysctl.d/60-netipv4.conf; sysctl -w net.ipv4.conf.all.accept_redirects=0
+  threat:
+    attack_technique: T1557
+    attack_name: Adversary-in-the-Middle
+    cve: null
+    cvss: null
+    description: Empêche le détournement du routage local par fausses redirections ICMP.
+- control_id: '3.3.1.14'
+  check_type: comparison
+  title: Ensure net.ipv4.conf.all.accept_source_route is configured
+  domain: network
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Refuser le routage par la source empêche un attaquant d'imposer le chemin que prendront ses paquets vers la machine.
+  audit:
+    command: sysctl net.ipv4.conf.all.accept_source_route
+    expected: net.ipv4.conf.all.accept_source_route = 0
+    condition: Doit valoir 0
+  remediation:
+    type: bash
+    script: echo 'net.ipv4.conf.all.accept_source_route = 0' >> /etc/sysctl.d/60-netipv4.conf; sysctl -w net.ipv4.conf.all.accept_source_route=0
+  threat:
+    attack_technique: T1557
+    attack_name: Adversary-in-the-Middle
+    cve: null
+    cvss: null
+    description: Bloque le contournement des contrôles réseau via routage imposé par la source.
+- control_id: '3.3.1.18'
+  check_type: comparison
+  title: Ensure net.ipv4.tcp_syncookies is configured
+  domain: network
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Les SYN cookies permettent au système de continuer à accepter des connexions légitimes pendant une attaque par inondation SYN.
+  audit:
+    command: sysctl net.ipv4.tcp_syncookies
+    expected: net.ipv4.tcp_syncookies = 1
+    condition: Doit valoir 1
+  remediation:
+    type: bash
+    script: echo 'net.ipv4.tcp_syncookies = 1' >> /etc/sysctl.d/60-netipv4.conf; sysctl -w net.ipv4.tcp_syncookies=1
+  threat:
+    attack_technique: T1499.001
+    attack_name: 'Endpoint Denial of Service: OS Exhaustion Flood'
+    cve: null
+    cvss: null
+    description: Protège contre l'épuisement de ressources par inondation SYN (déni de service).
+- control_id: '3.3.1.4'
+  check_type: comparison
+  title: Ensure net.ipv4.conf.all.send_redirects is configured
+  domain: network
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Désactiver l'envoi de redirections ICMP empêche la machine d'influencer les tables de routage d'autres hôtes.
+  audit:
+    command: sysctl net.ipv4.conf.all.send_redirects
+    expected: net.ipv4.conf.all.send_redirects = 0
+    condition: Doit valoir 0
+  remediation:
+    type: bash
+    script: echo 'net.ipv4.conf.all.send_redirects = 0' >> /etc/sysctl.d/60-netipv4.conf; sysctl -w net.ipv4.conf.all.send_redirects=0
+  threat:
+    attack_technique: T1557
+    attack_name: Adversary-in-the-Middle
+    cve: null
+    cvss: null
+    description: Empêche l'hôte de participer à la manipulation du routage d'autres machines.
+- control_id: '3.3.1.12'
+  check_type: comparison
+  title: Ensure net.ipv4.conf.all.rp_filter is configured
+  domain: network
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Le filtrage par chemin inverse bloque les paquets dont l'adresse source est usurpée.
+  audit:
+    command: sysctl net.ipv4.conf.all.rp_filter
+    expected: net.ipv4.conf.all.rp_filter = 1
+    condition: Doit valoir 1
+  remediation:
+    type: bash
+    script: echo 'net.ipv4.conf.all.rp_filter = 1' >> /etc/sysctl.d/60-netipv4.conf; sysctl -w net.ipv4.conf.all.rp_filter=1
+  threat:
+    attack_technique: T1498
+    attack_name: Network Denial of Service
+    cve: null
+    cvss: null
+    description: Rejette les paquets à source usurpée, utilisés dans les attaques par réflexion.
+- control_id: '3.3.2.3'
+  check_type: comparison
+  title: Ensure net.ipv6.conf.all.accept_redirects is configured
+  domain: network
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Refuser les redirections ICMPv6 entrantes protège la table de routage IPv6 contre la manipulation.
+  audit:
+    command: sysctl net.ipv6.conf.all.accept_redirects
+    expected: net.ipv6.conf.all.accept_redirects = 0
+    condition: Doit valoir 0
+  remediation:
+    type: bash
+    script: echo 'net.ipv6.conf.all.accept_redirects = 0' >> /etc/sysctl.d/60-netipv6.conf; sysctl -w net.ipv6.conf.all.accept_redirects=0
+  threat:
+    attack_technique: T1557
+    attack_name: Adversary-in-the-Middle
+    cve: null
+    cvss: null
+    description: Empêche la manipulation du routage IPv6 par fausses redirections.
+- control_id: '3.3.2.5'
+  check_type: comparison
+  title: Ensure net.ipv6.conf.all.accept_source_route is configured
+  domain: network
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Refuser le routage par la source en IPv6 empêche un attaquant d'imposer le chemin de ses paquets.
+  audit:
+    command: sysctl net.ipv6.conf.all.accept_source_route
+    expected: net.ipv6.conf.all.accept_source_route = 0
+    condition: Doit valoir 0
+  remediation:
+    type: bash
+    script: echo 'net.ipv6.conf.all.accept_source_route = 0' >> /etc/sysctl.d/60-netipv6.conf; sysctl -w net.ipv6.conf.all.accept_source_route=0
+  threat:
+    attack_technique: T1557
+    attack_name: Adversary-in-the-Middle
+    cve: null
+    cvss: null
+    description: Bloque le routage imposé par la source en IPv6.
+- control_id: '3.3.2.7'
+  check_type: comparison
+  title: Ensure net.ipv6.conf.all.accept_ra is configured
+  domain: network
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Refuser les annonces de routeur IPv6 non sollicitées empêche la reconfiguration réseau de la machine par un tiers.
+  audit:
+    command: sysctl net.ipv6.conf.all.accept_ra
+    expected: net.ipv6.conf.all.accept_ra = 0
+    condition: Doit valoir 0
+  remediation:
+    type: bash
+    script: echo 'net.ipv6.conf.all.accept_ra = 0' >> /etc/sysctl.d/60-netipv6.conf; sysctl -w net.ipv6.conf.all.accept_ra=0
+  threat:
+    attack_technique: T1557
+    attack_name: Adversary-in-the-Middle
+    cve: null
+    cvss: null
+    description: Empêche l'usurpation de routeur IPv6 reconfigurant le réseau de l'hôte.
+- control_id: '3.1.3'
+  check_type: absence
+  title: Ensure bluetooth services are not in use
+  domain: network
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Le Bluetooth n'a pas sa place sur un serveur et constitue une surface d'attaque sans fil inutile.
+  audit:
+    command: systemctl is-enabled bluetooth.service 2>/dev/null
+    expected: null
+    condition: Le service bluetooth doit être désactivé ou absent
+  remediation:
+    type: bash
+    script: systemctl stop bluetooth.service; systemctl mask bluetooth.service
+  threat:
+    attack_technique: T1011
+    attack_name: Exfiltration Over Other Network Medium
+    cve: null
+    cvss: null
+    description: Élimine un canal sans fil pouvant servir d'accès ou d'exfiltration de proximité.
+- control_id: '3.2.3'
+  check_type: absence
+  title: Ensure dccp kernel module is not available
+  domain: network
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Le protocole DCCP est rarement utilisé et représente une surface d'attaque réseau évitable au niveau du noyau.
+  audit:
+    command: modprobe --showconfig | grep -P '\b(install|blacklist)\h+dccp\b'
+    expected: null
+    condition: Le module dccp doit être blacklisté et non chargeable
+  remediation:
+    type: bash
+    script: printf 'install dccp /bin/false\nblacklist dccp\n' >> /etc/modprobe.d/dccp.conf
+  threat:
+    attack_technique: T1210
+    attack_name: Exploitation of Remote Services
+    cve: null
+    cvss: null
+    description: Réduit la surface d'exploitation de protocoles réseau noyau peu utilisés.
+- control_id: '3.2.5'
+  check_type: absence
+  title: Ensure sctp kernel module is not available
+  domain: network
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Le protocole SCTP est peu courant et augmente inutilement la surface d'attaque s'il est chargeable.
+  audit:
+    command: modprobe --showconfig | grep -P '\b(install|blacklist)\h+sctp\b'
+    expected: null
+    condition: Le module sctp doit être blacklisté et non chargeable
+  remediation:
+    type: bash
+    script: printf 'install sctp /bin/false\nblacklist sctp\n' >> /etc/modprobe.d/sctp.conf
+  threat:
+    attack_technique: T1210
+    attack_name: Exploitation of Remote Services
+    cve: null
+    cvss: null
+    description: Réduit la surface d'exploitation de protocoles réseau noyau peu utilisés.
+- control_id: '3.3.1.16'
+  check_type: comparison
+  title: Ensure net.ipv4.conf.all.log_martians is configured
+  domain: network
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Journaliser les paquets à adresse impossible (martians) aide à détecter les tentatives d'usurpation d'adresse.
+  audit:
+    command: sysctl net.ipv4.conf.all.log_martians
+    expected: net.ipv4.conf.all.log_martians = 1
+    condition: Doit valoir 1
+  remediation:
+    type: bash
+    script: echo 'net.ipv4.conf.all.log_martians = 1' >> /etc/sysctl.d/60-netipv4.conf; sysctl -w net.ipv4.conf.all.log_martians=1
+  threat:
+    attack_technique: T1557
+    attack_name: Adversary-in-the-Middle
+    cve: null
+    cvss: null
+    description: Détecte les paquets à source usurpée, indice d'attaque par usurpation.
+- control_id: '3.3.1.7'
+  check_type: comparison
+  title: Ensure net.ipv4.icmp_echo_ignore_broadcasts is configured
+  domain: network
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Ignorer les pings broadcast empêche la machine de participer à des attaques par amplification (smurf).
+  audit:
+    command: sysctl net.ipv4.icmp_echo_ignore_broadcasts
+    expected: net.ipv4.icmp_echo_ignore_broadcasts = 1
+    condition: Doit valoir 1
+  remediation:
+    type: bash
+    script: echo 'net.ipv4.icmp_echo_ignore_broadcasts = 1' >> /etc/sysctl.d/60-netipv4.conf; sysctl -w net.ipv4.icmp_echo_ignore_broadcasts=1
+  threat:
+    attack_technique: T1498.001
+    attack_name: 'Network Denial of Service: Direct Network Flood'
+    cve: null
+    cvss: null
+    description: Empêche l'usage de l'hôte comme amplificateur dans une attaque par déni de service.
+- control_id: '3.1.2'
+  check_type: absence
+  title: Ensure wireless interfaces are not available
+  domain: network
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 2
+  impact: moderate
+  description: Désactiver les interfaces sans fil sur un serveur réduit la surface d'attaque réseau de proximité.
+  audit:
+    command: nmcli radio all 2>/dev/null
+    expected: null
+    condition: Les interfaces sans fil doivent être désactivées si non nécessaires
+  remediation:
+    type: bash
+    script: nmcli radio all off
+  threat:
+    attack_technique: T1011
+    attack_name: Exfiltration Over Other Network Medium
+    cve: null
+    cvss: null
+    description: Réduit la surface d'attaque sans fil et les canaux d'exfiltration de proximité.
+- control_id: '2.1.16'
+  check_type: absence
+  title: Ensure telnet-server services are not in use
+  domain: services
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 5
+  impact: critical
+  description: Telnet transmet tout en clair, y compris les mots de passe. Un serveur telnet est une faille d'interception majeure.
+  audit:
+    command: dpkg-query -s telnetd 2>/dev/null; systemctl is-enabled inetd 2>/dev/null
+    expected: null
+    condition: Aucun serveur telnet ne doit être installé ou actif
+  remediation:
+    type: bash
+    script: apt purge telnetd
+  threat:
+    attack_technique: T1040
+    attack_name: Network Sniffing
+    cve: null
+    cvss: null
+    description: Élimine un service transmettant les identifiants en clair, interceptables sur le réseau.
+- control_id: '2.2.4'
+  check_type: absence
+  title: Ensure telnet client is not installed
+  domain: services
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 5
+  impact: critical
+  description: Le client telnet transmet les identifiants en clair sur le réseau et ne doit pas être présent.
+  audit:
+    command: dpkg-query -s telnet 2>/dev/null | grep -Pi 'install ok installed'
+    expected: null
+    condition: Le paquet telnet ne doit pas être installé
+  remediation:
+    type: bash
+    script: apt purge telnet
+  threat:
+    attack_technique: T1040
+    attack_name: Network Sniffing
+    cve: null
+    cvss: null
+    description: Empêche l'usage d'un client transmettant les identifiants en clair.
+- control_id: '1.3.1.2'
+  check_type: presence
+  title: Ensure AppArmor is enabled
+  domain: services
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: AppArmor confine les programmes selon des profils de sécurité, limitant fortement les dégâts en cas de compromission d'un service.
+  audit:
+    command: aa-status | grep -i 'profiles are loaded'
+    expected: null
+    condition: AppArmor doit être activé et des profils chargés
+  remediation:
+    type: bash
+    script: systemctl enable apparmor.service; systemctl start apparmor.service
+  threat:
+    attack_technique: T1068
+    attack_name: Exploitation for Privilege Escalation
+    cve: null
+    cvss: null
+    description: Le confinement obligatoire limite l'impact d'une exploitation de service.
+- control_id: '2.2.2'
+  check_type: absence
+  title: Ensure rsh client is not installed
+  domain: services
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Le client rsh transmet les données en clair et repose sur une authentification par confiance d'hôte non sécurisée.
+  audit:
+    command: dpkg-query -s rsh-client 2>/dev/null | grep -Pi 'install ok installed'
+    expected: null
+    condition: Le paquet rsh-client ne doit pas être installé
+  remediation:
+    type: bash
+    script: apt purge rsh-client
+  threat:
+    attack_technique: T1040
+    attack_name: Network Sniffing
+    cve: null
+    cvss: null
+    description: Élimine un client à authentification faible et transmission en clair.
+- control_id: '2.1.6'
+  check_type: absence
+  title: Ensure ftp server services are not in use
+  domain: services
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: FTP transmet les identifiants en clair. Un serveur FTP non nécessaire doit être retiré pour réduire la surface d'attaque.
+  audit:
+    command: systemctl is-enabled vsftpd.service 2>/dev/null; dpkg-query -s vsftpd 2>/dev/null
+    expected: null
+    condition: Aucun serveur FTP ne doit être installé ou actif sauf besoin justifié
+  remediation:
+    type: bash
+    script: apt purge vsftpd
+  threat:
+    attack_technique: T1040
+    attack_name: Network Sniffing
+    cve: null
+    cvss: null
+    description: Élimine un service de transfert transmettant les identifiants en clair.
+- control_id: '1.1.1.10'
+  check_type: absence
+  title: Ensure usb-storage kernel module is not available
+  domain: services
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Désactiver le stockage USB empêche l'exfiltration de données ou l'introduction de logiciels malveillants par support amovible.
+  audit:
+    command: modprobe --showconfig | grep -P '\b(install|blacklist)\h+usb-storage\b'
+    expected: null
+    condition: Le module usb-storage doit être blacklisté et non chargeable
+  remediation:
+    type: bash
+    script: printf 'install usb-storage /bin/false\nblacklist usb-storage\n' >> /etc/modprobe.d/usb-storage.conf
+  threat:
+    attack_technique: T1091
+    attack_name: Replication Through Removable Media
+    cve: null
+    cvss: null
+    description: Bloque l'exfiltration et l'introduction de code malveillant par support USB.
+- control_id: '2.1.4'
+  check_type: absence
+  title: Ensure dns server services are not in use
+  domain: services
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Un serveur DNS non nécessaire élargit la surface d'attaque et doit être retiré.
+  audit:
+    command: systemctl is-enabled named.service bind9.service 2>/dev/null
+    expected: null
+    condition: Aucun serveur DNS ne doit être actif sauf besoin justifié
+  remediation:
+    type: bash
+    script: systemctl stop bind9.service; apt purge bind9
+  threat:
+    attack_technique: T1190
+    attack_name: Exploit Public-Facing Application
+    cve: null
+    cvss: null
+    description: Réduit la surface d'attaque en retirant un service réseau exposé non requis.
+- control_id: '2.1.9'
+  check_type: absence
+  title: Ensure network file system services are not in use
+  domain: services
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: NFS expose des partages réseau et doit être désactivé si la machine n'a pas vocation à servir des fichiers.
+  audit:
+    command: systemctl is-enabled nfs-server.service 2>/dev/null
+    expected: null
+    condition: nfs-server doit être désactivé ou absent sauf besoin justifié
+  remediation:
+    type: bash
+    script: systemctl stop nfs-server.service; apt purge nfs-kernel-server
+  threat:
+    attack_technique: T1135
+    attack_name: Network Share Discovery
+    cve: null
+    cvss: null
+    description: Réduit l'exposition de partages réseau pouvant être énumérés et exploités.
+- control_id: '2.1.12'
+  check_type: absence
+  title: Ensure rpcbind services are not in use
+  domain: services
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: rpcbind expose des services RPC souvent inutiles et historiquement vulnérables.
+  audit:
+    command: systemctl is-enabled rpcbind.service 2>/dev/null
+    expected: null
+    condition: rpcbind doit être désactivé ou absent sauf besoin justifié
+  remediation:
+    type: bash
+    script: systemctl stop rpcbind.service rpcbind.socket; apt purge rpcbind
+  threat:
+    attack_technique: T1210
+    attack_name: Exploitation of Remote Services
+    cve: null
+    cvss: null
+    description: Retire un service RPC exposé historiquement ciblé par des exploits.
+- control_id: '2.1.15'
+  check_type: absence
+  title: Ensure snmp services are not in use
+  domain: services
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: SNMP, surtout en v1/v2c, peut divulguer des informations système sensibles s'il n'est pas nécessaire.
+  audit:
+    command: systemctl is-enabled snmpd.service 2>/dev/null
+    expected: null
+    condition: snmpd doit être désactivé ou absent sauf besoin justifié
+  remediation:
+    type: bash
+    script: systemctl stop snmpd.service; apt purge snmpd
+  threat:
+    attack_technique: T1046
+    attack_name: Network Service Discovery
+    cve: null
+    cvss: null
+    description: Empêche la divulgation d'informations système via SNMP non sécurisé.
+- control_id: '2.1.2'
+  check_type: absence
+  title: Ensure avahi daemon services are not in use
+  domain: services
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Avahi (mDNS) annonce les services sur le réseau local et augmente la surface d'attaque sur un serveur.
+  audit:
+    command: systemctl is-enabled avahi-daemon.service 2>/dev/null
+    expected: null
+    condition: avahi-daemon doit être désactivé ou absent
+  remediation:
+    type: bash
+    script: systemctl stop avahi-daemon.service avahi-daemon.socket; apt purge avahi-daemon
+  threat:
+    attack_technique: T1046
+    attack_name: Network Service Discovery
+    cve: null
+    cvss: null
+    description: Cesse l'annonce des services sur le réseau local, utile à la reconnaissance.
+- control_id: '2.1.11'
+  check_type: absence
+  title: Ensure print server services are not in use
+  domain: services
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Le service d'impression CUPS n'a généralement pas sa place sur un serveur et augmente la surface d'attaque.
+  audit:
+    command: systemctl is-enabled cups.service 2>/dev/null
+    expected: null
+    condition: cups doit être désactivé ou absent sauf besoin justifié
+  remediation:
+    type: bash
+    script: systemctl stop cups.service cups.socket; apt purge cups
+  threat:
+    attack_technique: T1190
+    attack_name: Exploit Public-Facing Application
+    cve: null
+    cvss: null
+    description: Retire un service d'impression réseau exposé non requis sur serveur.
+- control_id: '1.1.1.1'
+  check_type: absence
+  title: Ensure cramfs kernel module is not available
+  domain: services
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Le système de fichiers cramfs est rarement nécessaire ; le désactiver réduit la surface d'attaque au niveau du noyau.
+  audit:
+    command: modprobe --showconfig | grep -P '\b(install|blacklist)\h+cramfs\b'; lsmod | grep cramfs
+    expected: null
+    condition: Le module cramfs doit être blacklisté, non chargé et non chargeable
+  remediation:
+    type: bash
+    script: printf 'install cramfs /bin/false\nblacklist cramfs\n' >> /etc/modprobe.d/cramfs.conf; modprobe -r cramfs 2>/dev/null
+  threat:
+    attack_technique: T1068
+    attack_name: Exploitation for Privilege Escalation
+    cve: null
+    cvss: null
+    description: Réduit la surface de modules noyau exploitables pour l'élévation de privilèges.
+- control_id: '1.1.1.9'
+  check_type: absence
+  title: Ensure firewire-core kernel module is not available
+  domain: services
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: FireWire permet un accès mémoire direct (DMA) et constitue un vecteur d'attaque physique s'il est chargé.
+  audit:
+    command: modprobe --showconfig | grep -P '\b(install|blacklist)\h+firewire-core\b'
+    expected: null
+    condition: Le module firewire-core doit être blacklisté et non chargeable
+  remediation:
+    type: bash
+    script: printf 'install firewire-core /bin/false\nblacklist firewire-core\n' >> /etc/modprobe.d/firewire.conf
+  threat:
+    attack_technique: T1200
+    attack_name: Hardware Additions
+    cve: null
+    cvss: null
+    description: Bloque l'accès mémoire direct par FireWire, vecteur d'attaque par matériel branché.
+- control_id: '1.1.2.1.3'
+  check_type: presence
+  title: Ensure nosuid option set on /tmp partition
+  domain: services
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: L'option nosuid sur /tmp empêche l'exécution de binaires setuid déposés dans ce répertoire, bloquant une voie d'élévation de privilèges.
+  audit:
+    command: findmnt --kernel /tmp | grep nosuid
+    expected: null
+    condition: La partition /tmp doit être montée avec l'option nosuid
+  remediation:
+    type: bash
+    script: '# Ajouter l''option nosuid au montage de /tmp dans /etc/fstab puis remonter'
+  threat:
+    attack_technique: T1548.001
+    attack_name: 'Abuse Elevation Control Mechanism: Setuid and Setgid'
+    cve: null
+    cvss: null
+    description: Empêche l'exploitation de binaires setuid déposés dans un répertoire temporaire.
+- control_id: '1.1.2.1.4'
+  check_type: presence
+  title: Ensure noexec option set on /tmp partition
+  domain: services
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: L'option noexec sur /tmp empêche l'exécution de binaires depuis ce répertoire, fréquemment utilisé par les attaquants pour déposer des charges.
+  audit:
+    command: findmnt --kernel /tmp | grep noexec
+    expected: null
+    condition: La partition /tmp doit être montée avec l'option noexec
+  remediation:
+    type: bash
+    script: '# Ajouter l''option noexec au montage de /tmp dans /etc/fstab puis remonter'
+  threat:
+    attack_technique: T1059.004
+    attack_name: 'Command and Scripting Interpreter: Unix Shell'
+    cve: null
+    cvss: null
+    description: Empêche l'exécution de charges malveillantes déposées dans /tmp.
+- control_id: '2.1.1'
+  check_type: absence
+  title: Ensure autofs services are not in use
+  domain: services
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Le montage automatique de systèmes de fichiers peut exposer la machine à des supports non maîtrisés.
+  audit:
+    command: systemctl is-enabled autofs.service 2>/dev/null
+    expected: null
+    condition: autofs doit être désactivé ou absent sauf besoin justifié
+  remediation:
+    type: bash
+    script: systemctl stop autofs.service; apt purge autofs
+  threat:
+    attack_technique: T1091
+    attack_name: Replication Through Removable Media
+    cve: null
+    cvss: null
+    description: Empêche le montage automatique de supports potentiellement malveillants.
+- control_id: '2.1.3'
+  check_type: absence
+  title: Ensure dhcp server services are not in use
+  domain: services
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Un serveur DHCP non maîtrisé peut perturber l'attribution d'adresses sur le réseau ou servir d'attaque.
+  audit:
+    command: systemctl is-enabled isc-dhcp-server.service 2>/dev/null
+    expected: null
+    condition: Aucun serveur DHCP ne doit être actif sauf besoin justifié
+  remediation:
+    type: bash
+    script: systemctl stop isc-dhcp-server.service; apt purge isc-dhcp-server
+  threat:
+    attack_technique: T1557
+    attack_name: Adversary-in-the-Middle
+    cve: null
+    cvss: null
+    description: Empêche un serveur DHCP non autorisé de détourner la configuration réseau des clients.
+- control_id: '6.2.1.2'
+  check_type: presence
+  title: Ensure auditd service is enabled and active
+  domain: logging
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Le service auditd doit tourner en permanence pour capturer les événements de sécurité système, indispensable à toute investigation après incident.
+  audit:
+    command: systemctl is-enabled auditd.service; systemctl is-active auditd.service
+    expected: null
+    condition: auditd doit être enabled et active
+  remediation:
+    type: bash
+    script: |-
+      apt install auditd audispd-plugins
+      systemctl --now enable auditd.service
+  threat:
+    attack_technique: T1562.001
+    attack_name: 'Impair Defenses: Disable or Modify Tools'
+    cve: null
+    cvss: null
+    description: Garantit la capture continue des événements de sécurité, base de la détection d'intrusion.
+- control_id: '6.2.1.1'
+  check_type: presence
+  title: Ensure auditd packages are installed
+  domain: logging
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: auditd enregistre les événements de sécurité système ; sa présence est le prérequis à toute journalisation d'audit.
+  audit:
+    command: dpkg-query -s auditd audispd-plugins 2>/dev/null | grep -Pi 'install ok installed'
+    expected: null
+    condition: Les paquets auditd et audispd-plugins doivent être installés
+  remediation:
+    type: bash
+    script: apt install auditd audispd-plugins
+  threat:
+    attack_technique: T1562.001
+    attack_name: 'Impair Defenses: Disable or Modify Tools'
+    cve: null
+    cvss: null
+    description: Prérequis à la journalisation des événements de sécurité.
+- control_id: '6.2.2.2'
+  check_type: comparison
+  title: Ensure audit logs are not automatically deleted
+  domain: logging
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Empêcher la suppression automatique des journaux d'audit préserve les preuves en cas d'incident de sécurité.
+  audit:
+    command: grep max_log_file_action /etc/audit/auditd.conf
+    expected: max_log_file_action = keep_logs
+    condition: max_log_file_action doit être keep_logs
+  remediation:
+    type: bash
+    script: |-
+      apt install auditd audispd-plugins
+      sed -i 's/^max_log_file_action.*/max_log_file_action = keep_logs/' /etc/audit/auditd.conf
+  threat:
+    attack_technique: T1070
+    attack_name: Indicator Removal
+    cve: null
+    cvss: null
+    description: Empêche la perte de preuves d'audit, contrant l'effacement de traces par un attaquant.
+- control_id: '6.2.4.1'
+  check_type: presence
+  title: Ensure audit log files mode is configured
+  domain: logging
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Restreindre les permissions des journaux d'audit empêche leur lecture ou altération par des utilisateurs non autorisés.
+  audit:
+    command: stat -Lc '%a' /var/log/audit/audit.log
+    expected: null
+    condition: Les fichiers de log d'audit doivent être en 640 ou plus restrictif
+  remediation:
+    type: bash
+    script: |-
+      apt install auditd audispd-plugins
+      systemctl start auditd
+      chmod 0640 /var/log/audit/audit.log
+  threat:
+    attack_technique: T1070.002
+    attack_name: 'Indicator Removal: Clear Linux or Mac System Logs'
+    cve: null
+    cvss: null
+    description: Protège les journaux d'audit contre la lecture et l'altération non autorisées.
+- control_id: '6.2.4.5'
+  check_type: presence
+  title: Ensure audit configuration files mode is configured
+  domain: logging
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Protéger les fichiers de configuration d'audit empêche la modification non autorisée des règles de surveillance.
+  audit:
+    command: find /etc/audit/ -type f \( -name '*.conf' -o -name '*.rules' \) -exec stat -Lc '%n %a' {} +
+    expected: null
+    condition: Les fichiers de configuration d'audit doivent être en 640 ou plus restrictif
+  remediation:
+    type: bash
+    script: |-
+      apt install auditd audispd-plugins
+      find /etc/audit/ -type f \( -name '*.conf' -o -name '*.rules' \) -exec chmod u-x,g-wx,o-rwx {} +
+  threat:
+    attack_technique: T1562.001
+    attack_name: 'Impair Defenses: Disable or Modify Tools'
+    cve: null
+    cvss: null
+    description: Empêche la modification des règles d'audit pour échapper à la surveillance.
+- control_id: '6.2.1.3'
+  check_type: presence
+  title: Ensure auditing for processes that start prior to auditd is enabled
+  domain: logging
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Activer l'audit dès le démarrage du noyau (audit=1) capture les événements survenant avant le lancement d'auditd.
+  audit:
+    command: grep -P 'audit=1' /proc/cmdline
+    expected: null
+    condition: Le paramètre noyau audit=1 doit être présent
+  remediation:
+    type: bash
+    script: '# Ajouter audit=1 à GRUB_CMDLINE_LINUX puis update-grub'
+  threat:
+    attack_technique: T1562.001
+    attack_name: 'Impair Defenses: Disable or Modify Tools'
+    cve: null
+    cvss: null
+    description: Garantit la capture des événements dès les premières étapes du démarrage.
+- control_id: '6.2.2.3'
+  check_type: presence
+  title: Ensure system is disabled when audit logs are full
+  domain: logging
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Réagir au remplissage des journaux d'audit évite de continuer à fonctionner sans traçabilité.
+  audit:
+    command: grep -E 'space_left_action|admin_space_left_action|disk_full_action' /etc/audit/auditd.conf
+    expected: null
+    condition: Les actions de saturation doivent être configurées
+  remediation:
+    type: bash
+    script: '# Configurer admin_space_left_action et disk_full_action dans auditd.conf'
+  threat:
+    attack_technique: T1070
+    attack_name: Indicator Removal
+    cve: null
+    cvss: null
+    description: Empêche la perte d'événements par saturation, contrant le noyage volontaire des logs.
+- control_id: '6.1.2.1'
+  check_type: presence
+  title: Ensure rsyslog is installed
+  domain: logging
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: rsyslog fournit une journalisation robuste et la capacité d'envoyer les logs vers un hôte distant pour les protéger.
+  audit:
+    command: dpkg-query -s rsyslog 2>/dev/null | grep -Pi 'install ok installed'
+    expected: null
+    condition: Le paquet rsyslog doit être installé
+  remediation:
+    type: bash
+    script: apt install rsyslog
+  threat:
+    attack_technique: T1070
+    attack_name: Indicator Removal
+    cve: null
+    cvss: null
+    description: Permet la centralisation des journaux, protégeant les preuves contre l'effacement local.
+- control_id: '6.1.2.2'
+  check_type: presence
+  title: Ensure rsyslog service is enabled and active
+  domain: logging
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Le service rsyslog doit être actif pour assurer la collecte continue des journaux système.
+  audit:
+    command: systemctl is-enabled rsyslog.service; systemctl is-active rsyslog.service
+    expected: null
+    condition: rsyslog doit être enabled et active
+  remediation:
+    type: bash
+    script: |-
+      apt install rsyslog
+      systemctl --now enable rsyslog.service
+  threat:
+    attack_technique: T1070
+    attack_name: Indicator Removal
+    cve: null
+    cvss: null
+    description: Garantit la collecte continue des journaux système.
+- control_id: '6.1.3.1'
+  # presence-as-configured : vérifie que les fichiers de log existent et sont
+  # listés ; la validation fine des permissions relève d'une passe ultérieure.
+  check_type: presence
+  title: Ensure access to all logfiles has been configured
+  domain: logging
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Restreindre l'accès aux fichiers journaux empêche la fuite d'informations sensibles ou leur altération par un attaquant.
+  audit:
+    command: find /var/log -type f -exec stat -Lc '%n %a' {} +
+    expected: null
+    condition: Les fichiers de log ne doivent pas être trop largement accessibles
+  remediation:
+    type: bash
+    script: '# Appliquer des permissions restrictives sur les fichiers de /var/log'
+  threat:
+    attack_technique: T1070.002
+    attack_name: 'Indicator Removal: Clear Linux or Mac System Logs'
+    cve: null
+    cvss: null
+    description: Empêche la lecture et l'effacement non autorisés des journaux système.
+- control_id: '6.1.1.1'
+  check_type: comparison
+  title: Ensure journald service is active
+  domain: logging
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: systemd-journald collecte les journaux système et doit être actif pour assurer la traçabilité de base de l'hôte.
+  audit:
+    command: systemctl is-active systemd-journald.service
+    expected: active
+    condition: systemd-journald doit être actif
+  remediation:
+    type: bash
+    script: systemctl start systemd-journald.service
+  threat:
+    attack_technique: T1562.001
+    attack_name: 'Impair Defenses: Disable or Modify Tools'
+    cve: null
+    cvss: null
+    description: Garantit la journalisation système de base par journald.
+- control_id: '6.3.1'
+  check_type: presence
+  title: Ensure AIDE is installed
+  domain: logging
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: AIDE vérifie l'intégrité du système de fichiers et détecte les modifications non autorisées de fichiers critiques.
+  audit:
+    command: dpkg-query -s aide aide-common 2>/dev/null | grep -Pi 'install ok installed'
+    expected: null
+    condition: Les paquets aide et aide-common doivent être installés
+  remediation:
+    type: bash
+    script: apt install aide aide-common
+  threat:
+    attack_technique: T1565.001
+    attack_name: 'Data Manipulation: Stored Data Manipulation'
+    cve: null
+    cvss: null
+    description: Détecte l'altération de fichiers système, signe d'une compromission ou d'une porte dérobée.
+- control_id: '6.3.2'
+  check_type: presence
+  title: Ensure filesystem integrity is regularly checked
+  domain: logging
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Planifier des vérifications régulières d'AIDE garantit la détection en temps voulu des altérations de fichiers.
+  audit:
+    command: systemctl is-enabled aidecheck.timer 2>/dev/null; grep -r aide /etc/cron.* /etc/crontab 2>/dev/null
+    expected: null
+    condition: Une vérification AIDE périodique (timer systemd ou cron) doit être configurée
+  remediation:
+    type: bash
+    script: '# Configurer un timer systemd ou une tâche cron lançant aide --check'
+  threat:
+    attack_technique: T1565.001
+    attack_name: 'Data Manipulation: Stored Data Manipulation'
+    cve: null
+    cvss: null
+    description: Assure la détection périodique des modifications non autorisées de fichiers.
+- control_id: '6.2.2.1'
+  check_type: presence
+  title: Ensure audit log storage size is configured
+  domain: logging
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Dimensionner la taille des journaux d'audit évite des rotations trop fréquentes ou une saturation prématurée perdant des événements.
+  audit:
+    command: grep max_log_file /etc/audit/auditd.conf
+    expected: null
+    condition: max_log_file doit être défini selon la politique de rétention
+  remediation:
+    type: bash
+    script: |-
+      apt install auditd audispd-plugins
+      sed -i 's/^max_log_file .*/max_log_file = 8/' /etc/audit/auditd.conf
+  threat:
+    attack_technique: T1070
+    attack_name: Indicator Removal
+    cve: null
+    cvss: null
+    description: Évite la perte d'événements d'audit par sous-dimensionnement des journaux.
+- control_id: '6.1.1.4'
+  check_type: presence
+  title: Ensure journald ForwardToSyslog is configured
+  domain: logging
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Configurer le transfert de journald vers syslog selon l'architecture de centralisation des journaux retenue.
+  audit:
+    command: grep -P '^\h*ForwardToSyslog' /etc/systemd/journald.conf
+    expected: null
+    condition: ForwardToSyslog doit être réglé conformément à la politique de journalisation
+  remediation:
+    type: bash
+    script: '# Régler ForwardToSyslog dans /etc/systemd/journald.conf selon la politique'
+  threat:
+    attack_technique: T1070
+    attack_name: Indicator Removal
+    cve: null
+    cvss: null
+    description: Soutient la centralisation des journaux pour protéger les preuves.
+- control_id: '6.2.3.1'
+  check_type: presence
+  title: Ensure changes to system administration scope (sudoers) is collected
+  domain: logging
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Auditer les modifications du fichier sudoers détecte les tentatives d'élargissement non autorisé des privilèges d'élévation.
+  audit:
+    command: auditctl -l | grep -E '/etc/sudoers'
+    expected: null
+    condition: Une règle d'audit doit surveiller /etc/sudoers et /etc/sudoers.d
+  remediation:
+    type: bash
+    script: |-
+      apt install auditd audispd-plugins
+      printf -- '-w /etc/sudoers -p wa -k scope\n-w /etc/sudoers.d -p wa -k scope\n' >> /etc/audit/rules.d/50-scope.rules
+      augenrules --load
+  threat:
+    attack_technique: T1548.003
+    attack_name: 'Abuse Elevation Control Mechanism: Sudo and Sudo Caching'
+    cve: null
+    cvss: null
+    description: Détecte les modifications de la configuration sudo, vecteur d'élévation de privilèges.
+- control_id: '5.1.6'
+  check_type: presence
+  title: Ensure sshd Ciphers are configured
+  domain: crypto
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Limiter les algorithmes de chiffrement SSH à des ciphers forts empêche l'usage d'algorithmes faibles ou obsolètes vulnérables au déchiffrement.
+  audit:
+    command: sshd -T | grep ciphers
+    expected: null
+    condition: Seuls des ciphers forts doivent être autorisés (pas de cbc, arcfour)
+  remediation:
+    type: bash
+    script: |-
+      sed -i -E '/^[[:space:]]*#*[[:space:]]*Ciphers[[:space:]]/Id' /etc/ssh/sshd_config
+      echo 'Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com' >> /etc/ssh/sshd_config
+  threat:
+    attack_technique: T1040
+    attack_name: Network Sniffing
+    cve: null
+    cvss: null
+    description: Empêche l'usage de chiffrements faibles exposant le trafic SSH au déchiffrement.
+- control_id: '5.1.12'
+  check_type: presence
+  title: Ensure sshd KexAlgorithms is configured
+  domain: crypto
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Restreindre les algorithmes d'échange de clés SSH à des méthodes robustes protège l'établissement sécurisé des sessions.
+  audit:
+    command: sshd -T | grep kexalgorithms
+    expected: null
+    condition: Seuls des algorithmes d'échange de clés forts doivent être autorisés
+  remediation:
+    type: bash
+    script: |-
+      sed -i -E '/^[[:space:]]*#*[[:space:]]*KexAlgorithms[[:space:]]/Id' /etc/ssh/sshd_config
+      echo 'KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512' >> /etc/ssh/sshd_config
+  threat:
+    attack_technique: T1557
+    attack_name: Adversary-in-the-Middle
+    cve: null
+    cvss: null
+    description: Empêche les attaques de l'homme du milieu via échange de clés faible.
+- control_id: '5.1.16'
+  check_type: presence
+  title: Ensure sshd MACs are configured
+  domain: crypto
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Limiter les codes d'authentification de message SSH à des algorithmes forts protège l'intégrité des échanges.
+  audit:
+    command: sshd -T | grep -i macs
+    expected: null
+    condition: Seuls des MAC forts doivent être autorisés (pas de MD5, pas de 96 bits)
+  remediation:
+    type: bash
+    script: |-
+      sed -i -E '/^[[:space:]]*#*[[:space:]]*MACs[[:space:]]/Id' /etc/ssh/sshd_config
+      echo 'MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com' >> /etc/ssh/sshd_config
+  threat:
+    attack_technique: T1557
+    attack_name: Adversary-in-the-Middle
+    cve: null
+    cvss: null
+    description: Empêche l'altération des données SSH via codes d'intégrité faibles.
+- control_id: '5.4.1.4-crypto'
+  check_type: presence
+  title: Ensure password hashing algorithm is strong (yescrypt)
+  domain: crypto
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Le hachage des mots de passe doit utiliser un algorithme moderne et coûteux (yescrypt) pour résister au cassage hors ligne après vol du fichier shadow.
+  audit:
+    command: grep -P '^\h*ENCRYPT_METHOD' /etc/login.defs
+    expected: null
+    condition: ENCRYPT_METHOD doit être YESCRYPT (ou SHA512 à défaut)
+  remediation:
+    type: bash
+    script: sed -i 's/^ENCRYPT_METHOD.*/ENCRYPT_METHOD YESCRYPT/' /etc/login.defs
+  threat:
+    attack_technique: T1110.002
+    attack_name: 'Brute Force: Password Cracking'
+    cve: null
+    cvss: null
+    description: Un hachage coûteux ralentit drastiquement le cassage hors ligne des mots de passe.
+- control_id: '1.5.4'
+  check_type: comparison
+  title: Ensure kernel.randomize_va_space is configured
+  domain: crypto
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: L'ASLR (randomisation de l'espace d'adressage) rend les exploits par corruption mémoire bien plus difficiles à réaliser.
+  audit:
+    command: sysctl kernel.randomize_va_space
+    expected: kernel.randomize_va_space = 2
+    condition: Doit valoir 2
+  remediation:
+    type: bash
+    script: echo 'kernel.randomize_va_space = 2' >> /etc/sysctl.d/60-kernel.conf; sysctl -w kernel.randomize_va_space=2
+  threat:
+    attack_technique: T1203
+    attack_name: Exploitation for Client Execution
+    cve: null
+    cvss: null
+    description: L'ASLR complique fortement l'exploitation des vulnérabilités mémoire.
+- control_id: '1.5.1'
+  check_type: comparison
+  title: Ensure address space layout randomization is enabled
+  domain: crypto
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Confirmer que l'ASLR est actif au niveau système renforce la protection contre les exploits mémoire.
+  audit:
+    command: sysctl kernel.randomize_va_space
+    expected: kernel.randomize_va_space = 2
+    condition: Doit valoir 2
+  remediation:
+    type: bash
+    script: echo 'kernel.randomize_va_space = 2' >> /etc/sysctl.d/60-kernel.conf; sysctl -w kernel.randomize_va_space=2
+  threat:
+    attack_technique: T1203
+    attack_name: Exploitation for Client Execution
+    cve: null
+    cvss: null
+    description: Renforce la résistance du système aux techniques d'exploitation mémoire.
+- control_id: '1.5.3'
+  check_type: comparison
+  title: Ensure kernel.yama.ptrace_scope is configured
+  domain: crypto
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Restreindre ptrace empêche un processus d'inspecter la mémoire d'autres processus, limitant le vol de secrets en mémoire.
+  audit:
+    command: sysctl kernel.yama.ptrace_scope
+    expected: kernel.yama.ptrace_scope = 1
+    condition: Doit valoir 1 ou plus
+  remediation:
+    type: bash
+    script: echo 'kernel.yama.ptrace_scope = 1' >> /etc/sysctl.d/60-kernel.conf; sysctl -w kernel.yama.ptrace_scope=1
+  threat:
+    attack_technique: T1003
+    attack_name: OS Credential Dumping
+    cve: null
+    cvss: null
+    description: Empêche l'inspection mémoire d'autres processus pour y voler des identifiants.
+- control_id: '1.5.2'
+  check_type: comparison
+  title: Ensure ptrace_scope is restricted
+  domain: crypto
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Restreindre la portée de ptrace limite la capacité d'un processus à déboguer et lire la mémoire d'autres processus.
+  audit:
+    command: sysctl kernel.yama.ptrace_scope
+    expected: kernel.yama.ptrace_scope = 1
+    condition: Doit valoir 1 ou plus
+  remediation:
+    type: bash
+    script: echo 'kernel.yama.ptrace_scope = 1' >> /etc/sysctl.d/60-kernel.conf; sysctl -w kernel.yama.ptrace_scope=1
+  threat:
+    attack_technique: T1055
+    attack_name: Process Injection
+    cve: null
+    cvss: null
+    description: Limite l'injection et l'inspection de processus via ptrace.
+- control_id: '6.1.2.10'
+  # Cas CONDITIONNEL (le forwarding rsyslog est-il configuré ou non ?) laissé
+  # SANS check_type : repli heuristique -> warn si sortie exploitable, sinon na.
+  # À traiter dans une passe ultérieure (distinguer "pas de forwarding" de
+  # "forwarding sans TLS"). On ne force pas de pass/fail trompeur.
+  title: Ensure rsyslog forwarding uses TLS (gtls)
+  domain: crypto
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Chiffrer le transfert des journaux vers un hôte distant protège leur confidentialité et leur intégrité en transit.
+  audit:
+    command: grep -P 'DefaultNetstreamDriver\s+gtls' /etc/rsyslog.conf /etc/rsyslog.d/*.conf
+    expected: null
+    condition: Si rsyslog transfère des logs, il doit utiliser le driver gtls (TLS)
+  remediation:
+    type: bash
+    script: '# Configurer DefaultNetstreamDriver gtls et les certificats dans rsyslog'
+  threat:
+    attack_technique: T1040
+    attack_name: Network Sniffing
+    cve: null
+    cvss: null
+    description: Empêche l'interception des journaux transmis en clair sur le réseau.
+- control_id: '6.1.2.9'
+  check_type: presence
+  title: Ensure rsyslog-gnutls is installed
+  domain: crypto
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 2
+  impact: moderate
+  description: Le paquet rsyslog-gnutls fournit le support TLS nécessaire au transfert chiffré des journaux.
+  audit:
+    command: dpkg-query -s rsyslog-gnutls 2>/dev/null | grep -Pi 'install ok installed'
+    expected: null
+    condition: rsyslog-gnutls doit être installé si le transfert TLS est utilisé
+  remediation:
+    type: bash
+    script: apt install rsyslog-gnutls
+  threat:
+    attack_technique: T1040
+    attack_name: Network Sniffing
+    cve: null
+    cvss: null
+    description: Prérequis au chiffrement TLS du transfert des journaux.
+- control_id: '1.5.5'
+  check_type: comparison
+  title: Ensure kernel.kptr_restrict is configured
+  domain: crypto
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Restreindre l'exposition des pointeurs noyau complique l'exploitation des vulnérabilités du noyau en masquant les adresses mémoire.
+  audit:
+    command: sysctl kernel.kptr_restrict
+    expected: kernel.kptr_restrict = 1
+    condition: Doit valoir 1 ou 2
+  remediation:
+    type: bash
+    script: echo 'kernel.kptr_restrict = 1' >> /etc/sysctl.d/60-kernel.conf; sysctl -w kernel.kptr_restrict=1
+  threat:
+    attack_technique: T1068
+    attack_name: Exploitation for Privilege Escalation
+    cve: null
+    cvss: null
+    description: Masque les adresses mémoire noyau, compliquant les exploits d'élévation.
+- control_id: '5.1.9'
+  check_type: comparison
+  title: Ensure sshd GSSAPIAuthentication is disabled
+  domain: crypto
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Désactiver GSSAPI quand il n'est pas utilisé réduit la surface d'attaque cryptographique du service SSH.
+  audit:
+    command: sshd -T | grep gssapiauthentication
+    expected: gssapiauthentication no
+    condition: Doit valoir no sauf usage de Kerberos
+  remediation:
+    type: bash
+    script: |-
+      sed -i -E '/^[[:space:]]*#*[[:space:]]*GSSAPIAuthentication[[:space:]]/Id' /etc/ssh/sshd_config
+      echo 'GSSAPIAuthentication no' >> /etc/ssh/sshd_config
+  threat:
+    attack_technique: T1190
+    attack_name: Exploit Public-Facing Application
+    cve: null
+    cvss: null
+    description: Réduit la surface d'attaque du service SSH en désactivant un mécanisme inutilisé.
+- control_id: '1.2.1.3'
+  check_type: presence
+  title: Ensure access to gpg key files are configured
+  domain: updates
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Protéger les clés GPG d'APT garantit l'intégrité de la vérification des signatures des paquets installés.
+  audit:
+    command: find /etc/apt/keyrings /etc/apt/trusted.gpg.d -type f -exec stat -Lc '%n %a %U %G' {} +
+    expected: null
+    condition: Les clés GPG doivent être en 644 ou plus restrictif, propriétaire root
+  remediation:
+    type: bash
+    script: find /etc/apt/trusted.gpg.d -type f -exec chmod u-x,go-wx {} +; find /etc/apt/trusted.gpg.d -type f -exec chown root:root {} +
+  threat:
+    attack_technique: T1195.001
+    attack_name: 'Supply Chain Compromise: Compromise Software Dependencies and Development Tools'
+    cve: null
+    cvss: null
+    description: Protège les clés de vérification des paquets contre la substitution, garantissant la chaîne d'approvisionnement.
+- control_id: '1.3.1.1'
+  check_type: presence
+  title: Ensure AppArmor packages are installed
+  domain: updates
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Les paquets AppArmor fournissent le confinement des applications par profils de sécurité obligatoires.
+  audit:
+    command: dpkg-query -s apparmor 2>/dev/null | grep -Pi 'install ok installed'
+    expected: null
+    condition: Le paquet apparmor doit être installé
+  remediation:
+    type: bash
+    script: apt install apparmor apparmor-utils
+  threat:
+    attack_technique: T1068
+    attack_name: Exploitation for Privilege Escalation
+    cve: null
+    cvss: null
+    description: Prérequis au confinement des applications limitant l'impact des exploits.
+- control_id: '1.3.1.3'
+  check_type: presence
+  title: Ensure all AppArmor Profiles are enforcing
+  domain: updates
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Les profils AppArmor en mode enforce appliquent réellement les restrictions plutôt que de seulement les journaliser.
+  audit:
+    command: aa-status | grep -E 'profiles are in (complain|enforce) mode'
+    expected: null
+    condition: Les profils doivent être en mode enforce
+  remediation:
+    type: bash
+    script: aa-enforce /etc/apparmor.d/*
+  threat:
+    attack_technique: T1068
+    attack_name: Exploitation for Privilege Escalation
+    cve: null
+    cvss: null
+    description: Garantit l'application effective du confinement des applications.
+- control_id: '5.3.1.1'
+  check_type: absence
+  title: Ensure latest version of pam is installed
+  domain: updates
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Maintenir PAM à jour garantit l'application des derniers correctifs de sécurité du sous-système d'authentification.
+  audit:
+    command: apt list --upgradable 2>/dev/null | grep -iE '^(lib)?pam'
+    expected: null
+    condition: Aucun paquet PAM ne doit avoir de mise à jour en attente (à jour = conforme)
+  remediation:
+    type: bash
+    script: apt update && apt install --only-upgrade libpam-runtime libpam-modules
+  threat:
+    attack_technique: T1068
+    attack_name: Exploitation for Privilege Escalation
+    cve: null
+    cvss: null
+    description: Les mises à jour de PAM corrigent des failles d'authentification et d'élévation.
+- control_id: '1.2.1.1'
+  check_type: presence
+  title: Ensure GPG keys are configured
+  domain: updates
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: S'assurer que les clés GPG des dépôts APT sont correctement configurées garantit que seuls des paquets signés et de confiance sont installés.
+  audit:
+    command: apt-key list 2>/dev/null; ls /etc/apt/trusted.gpg.d/
+    expected: null
+    condition: Les clés GPG des dépôts doivent être présentes et valides
+  remediation:
+    type: bash
+    script: '# Vérifier et configurer les clés GPG des dépôts utilisés'
+  threat:
+    attack_technique: T1195.002
+    attack_name: 'Supply Chain Compromise: Compromise Software Supply Chain'
+    cve: null
+    cvss: null
+    description: Garantit l'authenticité des paquets installés contre la compromission de la chaîne d'approvisionnement.
+- control_id: '1.2.2.1'
+  check_type: absence
+  title: Ensure updates, patches, and additional security software are installed
+  domain: updates
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 4
+  impact: high
+  description: Appliquer régulièrement les mises à jour de sécurité réduit la fenêtre d'exposition aux vulnérabilités connues.
+  audit:
+    command: apt update >/dev/null 2>&1; apt list --upgradable 2>/dev/null | grep -i security
+    expected: null
+    condition: Aucune mise à jour de sécurité ne doit être en attente
+  remediation:
+    type: bash
+    script: apt update && apt upgrade
+  threat:
+    attack_technique: T1190
+    attack_name: Exploit Public-Facing Application
+    cve: null
+    cvss: null
+    description: L'application des correctifs ferme les vulnérabilités connues exploitables.
+- control_id: '1.2.1.2'
+  check_type: presence
+  title: Ensure weak dependencies are configured (Install-Recommends)
+  domain: updates
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Désactiver l'installation automatique des dépendances recommandées réduit la surface logicielle inutile et donc les vulnérabilités potentielles.
+  audit:
+    command: grep -rPi 'APT::Install-Recommends' /etc/apt/apt.conf.d/
+    expected: null
+    condition: APT::Install-Recommends doit être réglé selon la politique (souvent false)
+  remediation:
+    type: bash
+    script: echo 'APT::Install-Recommends "false";' >> /etc/apt/apt.conf.d/99norecommends
+  threat:
+    attack_technique: T1190
+    attack_name: Exploit Public-Facing Application
+    cve: null
+    cvss: null
+    description: Réduit la surface logicielle et donc le nombre de composants vulnérables potentiels.
+- control_id: '1.5.6'
+  check_type: absence
+  title: Ensure prelink is not installed
+  domain: updates
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: prelink modifie les binaires et casse la vérification d'intégrité ; il doit être absent pour préserver la détection d'altération.
+  audit:
+    command: dpkg-query -s prelink 2>/dev/null | grep -Pi 'install ok installed'
+    expected: null
+    condition: Le paquet prelink ne doit pas être installé
+  remediation:
+    type: bash
+    script: prelink -ua 2>/dev/null; apt purge prelink
+  threat:
+    attack_technique: T1027
+    attack_name: Obfuscated Files or Information
+    cve: null
+    cvss: null
+    description: Préserve l'intégrité vérifiable des binaires en évitant leur modification par prelink.
+- control_id: '1.2.1.8'
+  check_type: presence
+  title: Ensure access to /etc/apt/sources.list.d directory is configured
+  domain: updates
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Protéger le répertoire des sources APT empêche l'ajout de dépôts non autorisés distribuant des paquets malveillants.
+  audit:
+    command: stat -Lc '%n %a %U %G' /etc/apt/sources.list.d
+    expected: null
+    condition: Le répertoire doit être en 755 ou plus restrictif, propriétaire root
+  remediation:
+    type: bash
+    script: chmod 755 /etc/apt/sources.list.d; chown root:root /etc/apt/sources.list.d
+  threat:
+    attack_technique: T1195.002
+    attack_name: 'Supply Chain Compromise: Compromise Software Supply Chain'
+    cve: null
+    cvss: null
+    description: Empêche l'ajout de dépôts non autorisés dans la chaîne d'approvisionnement logicielle.
+- control_id: '1.5.7'
+  check_type: absence
+  title: Ensure Automatic Error Reporting is not enabled
+  domain: updates
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 2
+  impact: moderate
+  description: Désactiver le rapport d'erreurs automatique (apport) évite l'envoi involontaire de données système potentiellement sensibles.
+  audit:
+    command: dpkg-query -s apport 2>/dev/null; systemctl is-active apport.service 2>/dev/null
+    expected: null
+    condition: Le rapport d'erreurs automatique doit être désactivé ou apport absent
+  remediation:
+    type: bash
+    script: systemctl stop apport.service; apt purge apport
+  threat:
+    attack_technique: T1005
+    attack_name: Data from Local System
+    cve: null
+    cvss: null
+    description: Empêche la transmission involontaire de données système via les rapports d'erreur.
+- control_id: '5.3.1.3'
+  check_type: presence
+  title: Ensure latest version of libpam-pwquality is installed
+  domain: updates
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: libpam-pwquality applique les règles de qualité des mots de passe ; sa présence et sa mise à jour garantissent l'application de la politique.
+  audit:
+    command: dpkg-query -s libpam-pwquality 2>/dev/null | grep -Pi 'install ok installed'
+    expected: null
+    condition: libpam-pwquality doit être installé et à jour
+  remediation:
+    type: bash
+    script: apt install libpam-pwquality
+  threat:
+    attack_technique: T1110
+    attack_name: Brute Force
+    cve: null
+    cvss: null
+    description: Garantit l'application des règles de robustesse des mots de passe contre la force brute.
+- control_id: '1.2.1.4'
+  # manual : la confiance des dépôts (URLs vers des sources officielles) n'est
+  # pas évaluable automatiquement de façon fiable -> warn (revue humaine).
+  check_type: comparison
+  title: Ensure package manager repositories are configured
+  domain: updates
+  cis_level: L1
+  profile: server
+  automated: true
+  weight: 3
+  impact: moderate
+  description: Vérifier que les dépôts du gestionnaire de paquets sont configurés sur des sources officielles et de confiance prévient l'installation de paquets malveillants.
+  audit:
+    command: apt-cache policy | grep -E 'http|https'
+    expected: null
+    condition: Les dépôts doivent pointer vers des sources officielles de confiance
+  remediation:
+    type: bash
+    script: '# Vérifier /etc/apt/sources.list et sources.list.d pour ne garder que des dépôts officiels'
+  threat:
+    attack_technique: T1195.002
+    attack_name: 'Supply Chain Compromise: Compromise Software Supply Chain'
+    cve: null
+    cvss: null
+    description: Garantit que les paquets proviennent de sources officielles, contrant la compromission de chaîne d'approvisionnement.
