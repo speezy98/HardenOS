@@ -1,0 +1,28 @@
+[agent]
+# URL du backend HardenOS (sans slash final). Utiliser https:// une fois le
+# certificat serveur du backend émis (flask issue-backend-cert côté backend).
+backend_url = https://10.220.0.11:5001
+
+# ID du système dans HardenOS (visible dans l'interface → détail système)
+system_id = 1
+
+# Token d'agent généré par le backend pour ce système
+# (à copier depuis l'interface ou la commande flask generate-agent-token <id>)
+agent_token = REMPLACER_PAR_LE_TOKEN
+
+# Intervalle entre deux scans, en secondes (3600 = 1 heure)
+interval = 3600
+
+# Vérification TLS du backend :
+#   - laisser vide (recommandé) : utilise automatiquement la CA reçue du
+#     backend au moment de l'ajout de la machine (POST /setup), sans copie
+#     manuelle de fichier
+#   - chemin vers un fichier CA copié manuellement (utile pour le flux
+#     d'auto-enregistrement, où l'agent contacte le backend en premier et
+#     n'a donc encore rien reçu automatiquement)
+#   - "true"  : vérification via le magasin de certificats système
+#   - "false" : désactivée (dev / air-gapped sans PKI uniquement)
+verify_ssl =
+
+# Fichier de log (laisser vide = même dossier que l'agent)
+log_file =
