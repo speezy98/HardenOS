@@ -1,360 +1,550 @@
-# 🛡️ HardenOS
+# HardenOS
 
-Scanner de configuration sécurité automatique basé sur les référentiels **CIS Benchmark**.  
-Audite la conformité des systèmes Windows et Linux, score par domaine, propose des scripts de remédiation.
+HardenOS est un scanner de conformité qui audite des serveurs Linux et Windows
+au regard des référentiels **CIS Benchmark**, attribue un score de conformité par
+domaine de sécurité, et corrige les écarts constatés — avec sauvegarde préalable
+et possibilité de retour arrière.
+
+L'outil couvre le cycle complet : inventaire du parc, collecte des contrôles sur
+la machine réelle, scoring pondéré, rapport de conformité exportable, remédiation
+(unitaire ou groupée), annulation, et comparaison de deux audits pour mesurer
+l'effet du durcissement.
 
 ---
 
-## Statut du projet
+## Sommaire
 
-| Composant | Statut |
-|---|---|
-| Frontend — structure & design system | ✅ Fait |
-| Frontend — layout (Sidebar, TopBar, AppLayout) | ✅ Fait |
-| Frontend — vue Login (formulaire, gestion d'erreur, redirection) | ✅ Fait |
-| Frontend — Dashboard (KPI parc + liste systèmes réels) | ✅ Fait |
-| Frontend — vue détail système | ✅ Fait |
-| Frontend — vue remédiation (dry-run, apply, rollback) | ✅ Fait |
-| Frontend — vue comparaison d'audits (score, domaines, contrôles) | ✅ Fait |
-| Frontend — vue rapports (aperçu structuré + exports JSON / CSV / HTML imprimable) | ✅ Fait |
-| Frontend — vue gestion utilisateurs (CRUD, rôles, garde admin) | ✅ Fait |
-| Gestion utilisateurs admin (backend `/api/users` + UI : lister, créer, modifier, révoquer/réactiver, supprimer ; garde-fous) | ✅ Fait |
-| Écran « Mon compte » — self-service email + mot de passe pour tous les rôles (`/api/account`) | ✅ Fait |
-| Comparaison d'audits (backend `/api/comparison` + UI : score global, domaines, contrôles ; agnostique OS) | ✅ Fait |
-| Rapport de conformité par audit (backend `/api/reports` + UI : synthèse, domaines, non-conformités + remédiation ; agnostique OS) | ✅ Fait |
-| Exports de rapport JSON / CSV / HTML autonome imprimable (PDF via impression navigateur) | ✅ Fait |
-| Backend — socle MVC + modèles + connexion PostgreSQL | ✅ Fait |
-| Backend — authentification JWT (tokens, bcrypt, rôles, CLI admin) | ✅ Fait |
-| Backend — CRUD systèmes (credentials SSH chiffrés Fernet) | ✅ Fait |
-| Référentiels CIS — 300 contrôles YAML (Debian 13, AlmaLinux 10, Windows Server 2022) | ✅ Fait |
-| Backend — moteur d'audit + scoring CIS (6 domaines, niveau de risque) | ✅ Fait |
-| Backend — scanner SSH réel Linux (Paramiko, lecture seule, sudo optionnel, async) | ✅ Fait |
-| Classification déclarative des contrôles (`check_type`) — Debian annoté | ✅ Fait |
-| Annotation `check_type` — AlmaLinux 10 & Windows Server 2022 | ⏳ À venir |
-| Backend — audit Windows via agent HTTP (agent poussant ses résultats) | ✅ Fait |
-| Intégration auth frontend ↔ backend (login graphique réel, JWT) | ✅ Fait |
-| Intégration affichage systèmes frontend ↔ backend (lecture seule) | ✅ Fait |
-| Base de données (PostgreSQL — provisionnée sur VM Debian) | ✅ Fait |
+- [Fonctionnement d'ensemble](#fonctionnement-densemble)
+- [Stack technique](#stack-technique)
+- [Référentiels CIS](#référentiels-cis)
+- [Collecte : SSH pour Linux, agent pour Windows](#collecte--ssh-pour-linux-agent-pour-windows)
+- [Scoring](#scoring)
+- [Remédiation, sauvegarde et retour arrière](#remédiation-sauvegarde-et-retour-arrière)
+- [Sécurité](#sécurité)
+- [Rapports et comparaison d'audits](#rapports-et-comparaison-daudits)
+- [Interface](#interface)
+- [API HTTP](#api-http)
+- [Structure du dépôt](#structure-du-dépôt)
+- [Installation](#installation)
+- [Limites connues](#limites-connues)
+- [Feuille de route](#feuille-de-route)
+- [Licence](#licence)
+
+---
+
+## Fonctionnement d'ensemble
+
+Trois composants, déployés séparément :
+
+```
+    ┌───────────────┐   JWT / HTTPS   ┌───────────────┐   SQLAlchemy   ┌──────────────┐
+    │   Frontend    │ ◄─────────────► │    Backend    │ ◄────────────► │  PostgreSQL  │
+    │    Vue 3      │                 │  Flask (API)  │                │      16      │
+    └───────────────┘                 └───────┬───────┘                └──────────────┘
+                                              │
+                        ┌─────────────────────┴─────────────────────┐
+                        │                                           │
+                 SSH (Paramiko)                            HTTPS + token d'agent
+                  lecture seule                            (scripts signés Ed25519)
+                        │                                           │
+                        ▼                                           ▼
+              ┌───────────────────┐                     ┌──────────────────────┐
+              │   Serveur Linux   │                     │    Agent Windows     │
+              │  Debian / RHEL    │                     │  service, port 8585  │
+              └───────────────────┘                     └──────────────────────┘
+```
+
+Le **backend** est la seule source de vérité : il détient les référentiels CIS,
+calcule les scores, signe les scripts de remédiation et journalise chaque action.
+Le frontend n'est qu'une vue — aucune donnée d'audit n'y est fabriquée. Les
+machines cibles, elles, ne décident jamais de ce qu'elles exécutent : un serveur
+Linux reçoit des commandes d'audit en lecture seule via SSH, et un agent Windows
+refuse tout script dont il ne peut pas vérifier la signature.
+
+La distinction entre les deux OS s'arrête à la collecte. Une fois les résultats
+en base, tout le reste — scoring, rapport, comparaison, journalisation — est
+strictement agnostique : un rapport Windows et un rapport Debian ont la même
+forme et suivent le même chemin de code.
 
 ---
 
 ## Stack technique
 
-| Rôle | Technologie |
+| Composant | Technologies |
 |---|---|
-| Frontend | Vue.js 3 + Pinia + Vue Router + Vite |
-| Backend | Flask (Python 3.11) + SQLAlchemy + Flask-Migrate (Alembic) |
+| Frontend | Vue 3 (Composition API), Pinia, Vue Router 4, Vite 5, axios, Chart.js |
+| Backend | Python 3.11, Flask 3, SQLAlchemy 2, Flask-Migrate (Alembic), Flask-JWT-Extended |
 | Base de données | PostgreSQL 16 |
-| Scan Linux | Paramiko (SSH, lecture seule) ✅ |
-| Scan Windows | pywinrm + PowerShell |
-| Rapports | Assemblage backend (`/api/reports`) + génération client JSON / CSV / HTML autonome (PDF via impression navigateur) |
-| Auth | JWT + bcrypt |
-
----
-
-## Structure du projet
-
-```
-HardenOS/
-├── frontend/                    ← Vue.js 3
-    ├── src/
-    │   ├── main.js              Point d'entrée (Pinia + Router)
-    │   ├── App.vue              Composant racine
-    │   ├── router/              Vue Router 4 + navigation guards
-    │   ├── stores/              Stores Pinia (auth ✅ + systems ✅ + users ✅ branchés backend ; audits en mock, ui local)
-    │   ├── views/               Pages (Login ✅, Dashboard ✅, SystemDetail ✅, Remediation ✅, Compare ✅, Reports ✅, Users ✅)
-    │   ├── components/
-    │   │   ├── charts/          DomainBar ✅ — ScoreGauge 
-    │   │   ├── audit/           RiskBadge ✅, StatusBadge ✅, RoleBadge ✅ — ControlTable 
-    │   │   ├── system/          SystemCard ✅, OsIcon ✅ — SystemForm (à venir)
-    │   │   ├── icons/           LinuxIcon ✅, WindowsIcon ✅ (logos officiels via CDN)
-    │   │   └── layout/          AppLayout (+ toast global) ✅, Sidebar ✅, TopBar ✅
-    │   ├── api/                 Couche API axios (client + intercepteurs JWT, modules auth ✅ + systems ✅ + users ✅ + account ✅)
-    │   ├── services/            exportService.js (rapport JSON/CSV/HTML + téléchargement Blob)
-    │   ├── utils/               auditDiff.js (comparaison de snapshots)
-    │   └── assets/styles/       tokens.css, reset.css, global.css
-    ├── public/
-    ├── index.html
-    ├── package.json
-    └── vite.config.js
-└── backend/                     ← Flask (Python 3.11) — MVC
-    ├── app/
-    │   ├── __init__.py          App factory Flask (create_app)
-    │   ├── config.py            Configs dev/prod/test + URL PostgreSQL + JWT
-    │   ├── cli.py               Commandes CLI (flask create-admin)
-    │   ├── models/              M — modèles SQLAlchemy (un fichier par entité)
-    │   │   ├── user.py          User (+ hachage bcrypt, to_dict)
-    │   │   ├── system.py        System (+ to_dict sans credentials)
-    │   │   ├── audit.py         Audit
-    │   │   ├── audit_result.py  AuditResult
-    │   │   ├── snapshot.py      Snapshot
-    │   │   └── remediation_log.py  RemediationLog
-    │   ├── controllers/         C — Blueprints Flask
-    │   │   ├── health.py        GET /api/health
-    │   │   ├── auth.py          /api/auth (login, refresh, logout, me, admin-check)
-    │   │   ├── systems.py       /api/systems (CRUD + credentials SSH dédié)
-    │   │   └── audits.py        /api/audits (déclenchement async, détail, historique)
-    │   ├── services/            Logique métier
-    │   │   ├── auth.py          Authentification, génération de tokens, create_admin
-    │   │   ├── systems.py       Validation, chiffrement credentials, CRUD systèmes
-    │   │   ├── rules_loader.py  Chargement/sélection des référentiels CIS (YAML)
-    │   │   ├── audit_engine.py  Moteur d'audit + scoring CIS (6 domaines, risque)
-    │   │   ├── audit_service.py Orchestration : credentials, choix collecteur, async (thread)
-    │   │   └── collectors/      Connecteurs de collecte (interface commune)
-    │   │       ├── base.py      BaseCollector (interface) + CollectionResult
-    │   │       ├── stub.py      StubCollector (bouchon, démos/tests, sans réseau)
-    │   │       └── ssh_collector.py  SSHCollector (Paramiko, lecture seule, sudo optionnel)
-    │   └── utils/               Helpers transverses
-    │       ├── db.py            Instance SQLAlchemy partagée
-    │       ├── jwt.py           JWTManager + blocklist des tokens révoqués
-    │       ├── auth.py          Décorateur role_required (hiérarchie des rôles)
-    │       ├── crypto.py        Chiffrement Fernet (primitives encrypt/decrypt)
-    │       ├── ssh_credentials.py  (dé)chiffrement du couple {ssh_user, ssh_password}
-    │       └── ssh_errors.py    Messages d'erreur SSH courts et non sensibles
-    ├── cis_rules/               Référentiels CIS (300 contrôles, 100 par OS)
-    │   ├── debian13.yaml        CIS Debian Linux 13
-    │   ├── almalinux10.yaml     CIS AlmaLinux OS 10
-    │   └── windows_server2022.yaml  CIS Windows Server 2022
-    ├── migrations/              Migrations Alembic / Flask-Migrate
-    │   └── versions/            … + add_error_message_to_audits, add_use_sudo_to_systems
-    ├── wsgi.py                  Point d'entrée (port 5001 en dev)
-    ├── requirements.txt
-    └── .env.example
-```
-
-> Détails d'installation, routes d'auth et commande `create-admin` :
-> voir [`backend/README.md`](backend/README.md).
+| Collecte Linux | Paramiko (SSH, lecture seule) |
+| Collecte Windows | Agent autonome (`http.server`, service Windows via pywin32) |
+| Cryptographie | `cryptography` — Fernet (secrets au repos), X.509 (PKI interne), Ed25519 (signature de scripts) |
+| Référentiels | YAML (PyYAML) |
 
 ---
 
 ## Référentiels CIS
 
-Le moteur d'audit s'appuie sur **300 contrôles de sécurité** définis en YAML dans
-[`backend/cis_rules/`](backend/cis_rules/), soit **100 contrôles par système d'exploitation** :
+Le moteur d'audit s'appuie sur **300 contrôles** décrits en YAML dans
+[`backend/cis_rules/`](backend/cis_rules/), à raison de 100 par système
+d'exploitation :
 
-| Référentiel | Fichier | Source |
+| Fichier | Système | Source |
 |---|---|---|
-| Debian Linux 13 | `debian13.yaml` | CIS Debian Linux 13 Benchmark v1.0.0 |
-| AlmaLinux OS 10 | `almalinux10.yaml` | CIS AlmaLinux OS 10 Benchmark v1.0.0 |
-| Windows Server 2022 | `windows_server2022.yaml` | CIS Microsoft Windows Server 2022 Benchmark v5.0.0 |
+| `debian13.yaml` | Debian 13 (couvre aussi Ubuntu 22.04 / 24.04) | CIS Debian Linux 13 Benchmark v1.0.0 |
+| `almalinux10.yaml` | AlmaLinux 10 (couvre aussi RHEL et Rocky 9 / 10) | CIS AlmaLinux OS 10 Benchmark v1.0.0 |
+| `windows_server2022.yaml` | Windows Server 2022 | CIS Microsoft Windows Server 2022 Benchmark v5.0.0 |
 
-Les contrôles sont **sélectionnés parmi les contrôles automatisés** des benchmarks
-CIS officiels, en **priorisant les impacts `critical` et `high`**, et **répartis sur
-6 domaines** : `access`, `network`, `logging`, `crypto`, `updates`, `services`. Chaque
-contrôle est **rattaché à une technique MITRE ATT&CK** et, le cas échéant, à une **CVE
-vérifiée** (ex. Baron Samedit `CVE-2021-3156` côté Linux, PrintNightmare `CVE-2021-34527`
-et EternalBlue/SMBv1 `CVE-2017-0144` côté Windows).
+Les contrôles retenus sont ceux que les benchmarks officiels classent comme
+automatisables, sélectionnés en priorisant les impacts `critical` et `high`, puis
+répartis sur six domaines : `access`, `network`, `logging`, `crypto`, `updates` et
+`services`. Chacun est rattaché à une technique MITRE ATT&CK, et quelques-uns à
+une CVE documentée lorsque le lien est direct (Baron Samedit `CVE-2021-3156` côté
+Linux, PrintNightmare `CVE-2021-34527` et SMBv1 / EternalBlue `CVE-2017-0144` côté
+Windows).
 
-Chaque contrôle décrit : identifiant CIS, domaine, niveau (L1/L2), poids, impact, commande
-d'audit, valeur/condition attendue, un champ **`check_type`** indiquant au scanner comment
-interpréter la sortie (voir [Scanner SSH](#scanner-ssh-audit-réel-des-machines-linux)),
-script de remédiation, et le contexte de menace (technique ATT&CK, CVE/CVSS éventuelles).
+Un contrôle décrit son identifiant CIS, son domaine, son niveau (L1/L2), son
+poids, son impact, la commande d'audit à exécuter, la valeur ou la condition
+attendue, le script de remédiation associé, et le contexte de menace.
 
-> **Extensible sans toucher au code** : ajouter des contrôles ou prendre en charge un
-> nouveau référentiel se fait en **éditant ou en ajoutant un fichier YAML** dans
-> `backend/cis_rules/` — aucune modification du code applicatif n'est nécessaire.
-
----
-
-## Scanner SSH (audit réel des machines Linux)
-
-HardenOS **audite réellement les machines Linux via SSH** (Paramiko), en **lecture
-seule** : le scanner exécute uniquement les **commandes d'audit** des contrôles CIS
-sur la machine distante et n'applique **jamais** de remédiation.
-
-**Fonctionnement :**
-
-- **Exécution des contrôles CIS** : pour le système ciblé, le moteur charge le bon
-  référentiel (`rules_loader`) puis le `SSHCollector` ouvre **une seule connexion**
-  Paramiko et exécute la commande d'audit de chaque contrôle, collectant
-  `stdout` / `stderr` / code de sortie.
-- **Élévation de privilège optionnelle (`sudo`)** : un flag **`use_sudo`** par
-  système (colonne dédiée) permet d'exécuter les commandes via `sudo`. Le mot de
-  passe est transmis **de façon sécurisée sur l'entrée standard** (`sudo -S -p ''`)
-  et **n'apparaît jamais dans la ligne de commande**, ni dans les résultats, logs
-  ou messages d'erreur.
-- **Exécution asynchrone** : l'audit tourne **en arrière-plan** (thread + contexte
-  applicatif et session SQLAlchemy dédiés). Le déclenchement renvoie immédiatement
-  un audit en statut **`running`**, qui passe ensuite à **`done`** ou à **`error`**
-  (avec un `error_message` court et non sensible).
-- **Classification déclarative via `check_type`** : chaque contrôle du YAML
-  déclare son **sens d'évaluation** dans un champ `check_type`, qui **fait
-  autorité** (plus de devinette par mots-clés). Quatre valeurs :
-  - **`comparison`** : la sortie est comparée à une **valeur attendue**
-    (`audit.expected`) → conforme si elle correspond (`pass`), sinon `fail` ;
-  - **`presence`** : l'élément/réglage **doit** exister/être configuré → présent
-    (`pass`), **absent = non conforme** (`fail`) ;
-  - **`absence`** : l'élément **ne doit pas** exister → **absent = conforme**
-    (`pass`), présent (`fail`) ;
-  - **`manual`** : contrôle **non évaluable automatiquement** (jugement humain) →
-    **avertissement** (`warn`), sans exécuter de jugement pass/fail.
-  - Si un contrôle **n'a pas** de `check_type`, le scanner applique un **repli
-    heuristique** (mots-clés de la condition) pour rester rétro-compatible.
-- **Statuts résultants** : **non conforme** (`fail`), **conforme** (`pass`),
-  **non vérifiable** (`na`, exclu du score) et **vérification manuelle** (`warn`).
-  Le statut **`na`** est réservé aux **vrais échecs d'exécution** non
-  interprétables (permission refusée malgré sudo, sudo en échec, timeout), de
-  sorte que le score ne reflète **que ce qui a pu être réellement mesuré**.
-
-Le référentiel **Debian 13 est entièrement annoté** avec `check_type` (100 %
-des contrôles) ; **AlmaLinux 10 et Windows Server 2022 restent à annoter** et
-fonctionnent en attendant sur le **repli heuristique**.
-
-**Credentials SSH** : stockés **chiffrés (Fernet)** dans la colonne
-`ssh_credentials_enc` (jamais exposés par l'API, seul le booléen `has_credentials`
-l'est) et posés via l'**endpoint dédié** `PUT /api/systems/<id>/credentials`
-(`{ ssh_user, ssh_password }`), au format relu par le scanner.
-
-> **Mode démo / tests** : un `StubCollector` (sans réseau) permet d'exécuter un
-> audit synthétique reproductible sans connexion SSH (`use_stub`), utile pour les
-> démonstrations et les tests.
-
-### Limites connues (actuelles)
-
-- **Authentification par mot de passe uniquement** : l'authentification SSH par
-  **clé privée** n'est pas encore prise en charge (à venir).
-- **Contrôles non vérifiables** : certains contrôles restent **non vérifiables**
-  si l'**outil requis est absent** de la machine ou en cas de **droits
-  insuffisants** — ils sont exclus du score plutôt que comptés à tort.
-- **Contrôles « presence-as-configured »** : quelques contrôles vérifient
-  aujourd'hui qu'un **réglage existe** (présence de la directive) mais **pas
-  encore sa valeur exacte** ; leur durcissement en comparaison de valeur est
-  prévu dans une passe ultérieure.
-- **Annotation `check_type` incomplète hors Debian** : AlmaLinux 10 et Windows
-  Server 2022 ne sont **pas encore annotés** et reposent sur le repli heuristique.
-- **Scanner Windows (WinRM) non implémenté** : seul l'audit Linux via SSH est
-  fonctionnel ; les systèmes Windows ne sont pas encore audités.
+Ajouter des contrôles ou prendre en charge un nouveau référentiel se fait
+**en éditant ou en déposant un fichier YAML**, sans toucher au code : le
+`rules_loader` dérive dynamiquement la liste des familles auditables des fichiers
+présents dans le dossier, et le formulaire d'ajout de machine s'y adapte seul.
 
 ---
 
-## Architecture du frontend
+## Collecte : SSH pour Linux, agent pour Windows
 
-L'application est construite autour d'un layout principal qui orchestre :
-- une **Sidebar** de navigation à gauche (240px)
-- une **TopBar** avec breadcrumb et déconnexion (56px)
-- une zone de contenu centrale qui accueille les vues via `<router-view />`
+Le moteur d'audit ne connaît qu'une interface, `BaseCollector`. Trois
+implémentations la satisfont, ce qui rend le scoring indifférent à la manière dont
+les données ont été obtenues.
 
-Toutes les routes protégées sont des enfants d'`AppLayout`. Seul `/login` reste à la racine, sans layout.
+### Linux — connexion SSH sortante, en lecture seule
 
-L'authentification est **réellement branchée sur le backend** : le store Pinia `auth.js` appelle `POST /api/auth/login` et persiste l'**access token** (`hardenos_access_token`), le **refresh token** (`hardenos_refresh_token`) et l'utilisateur (`hardenos_user`) dans `localStorage`. L'intercepteur de requête axios (`api/client.js`) ajoute l'access token sur chaque appel ; l'intercepteur de réponse, sur un `401`, tente automatiquement **un** refresh via `POST /api/auth/refresh` puis rejoue la requête — et déconnecte l'utilisateur (purge du `localStorage` + redirection `/login`) si le refresh échoue. Le `logout` appelle `POST /api/auth/logout` pour révoquer le token côté serveur, puis nettoie l'état local même si l'appel échoue.
+Le `SSHCollector` ouvre **une seule connexion** Paramiko vers la machine cible et
+y exécute les commandes d'audit du référentiel, en collectant `stdout`, `stderr` et
+le code de sortie. Il n'écrit rien : la remédiation est un chemin distinct,
+déclenché explicitement.
 
-> Les **systèmes**, les **utilisateurs** et les **audits** sont désormais lus/écrits depuis le backend. Le **moteur d'audit et le scanner SSH** (`/api/audits`) alimentent réellement le détail système, la comparaison d'audits (`/api/comparison`) et les rapports (`/api/reports`). Plus aucune donnée en mock côté frontend.
+Quand le compte SSH n'est pas root mais sudoer, le drapeau `use_sudo` du système
+fait passer les commandes par `sudo -S -p ''` : le mot de passe transite par
+l'entrée standard et **n'apparaît jamais** dans la ligne de commande, ni dans les
+résultats, les journaux ou les messages d'erreur.
 
-Le **Dashboard** est **branché sur le backend réel** (store `systems.js` → `GET /api/systems`). Il affiche les KPI réellement disponibles sur le parc (total systèmes, en ligne, Linux, Windows) et un tableau des systèmes réels (hostname, IP, OS, mode de connexion, statut, dernier audit). Filtrage par OS et par statut. Il gère explicitement le **chargement**, l'**erreur** (backend injoignable, avec bouton « Réessayer ») et la **liste vide** (« Aucun système enregistré »).
+L'audit s'exécute en arrière-plan (thread avec contexte applicatif et session
+SQLAlchemy dédiés). Le déclenchement renvoie immédiatement un audit en statut
+`running`, qui bascule ensuite vers `done` ou `error` — ce dernier accompagné d'un
+message court et volontairement non sensible.
 
-> Les données d'audit (score de conformité, niveau de risque, nombre de contrôles) sont **désormais produites côté backend** (moteur d'audit + scanner SSH) mais **pas encore affichées dans ce Dashboard** : tant que l'intégration frontend n'est pas branchée, le Dashboard signale chaque machine comme **« non auditée »** plutôt que d'inventer ou d'afficher un zéro ambigu.
+L'interprétation de la sortie est **déclarative**. Chaque contrôle porte un champ
+`check_type` qui fait autorité et détermine le sens de l'évaluation :
 
-La **vue détail système** (`/systems/:id`) est branchée sur `GET /api/systems/<id>` et gère le **chargement**, le **404** (système inexistant → message + retour) et l'**erreur** réseau. Elle affiche :
-- **Bandeau système** : hostname (monospace), adresse IP, OS avec icône, statut (point coloré)
-- **Carte Informations** : OS/version, mode de connexion, statut, présence d'identifiants SSH et de jeton d'agent (via les booléens `has_credentials` / `has_agent_token` — **jamais** le secret lui-même), date d'ajout
-- **Bloc audit** : encart explicite **« Aucun audit disponible pour ce système »** (les scores par domaine, contrôles CIS et historique apparaîtront une fois l'**intégration frontend** des audits backend branchée)
+- `comparison` : la sortie est comparée à `audit.expected` ;
+- `presence` : le réglage doit exister — son absence est une non-conformité ;
+- `absence` : le réglage ne doit pas exister — sa présence est une non-conformité ;
+- `manual` : contrôle non évaluable par une machine, remonté en avertissement sans
+  jugement de conformité.
 
-La **vue remédiation** (`/remediation/:auditId`) liste les contrôles non conformes du dernier audit et permet de les corriger :
-- **Warning au chargement** : modal de précautions (snapshots VM, backup des configs, accès console) avec option "Ne plus afficher" persistée en `localStorage`
-- **Bloc diff** rouge → vert pour chaque contrôle (valeur actuelle / valeur attendue)
-- **Script bash** de correction affiché en monospace pour chaque contrôle
-- **Dry-run** : simulation sans modification, sortie cyan confirmant ce qui serait changé
-- **Appliquer** : correction simulée, bordure verte, sortie de confirmation
-- **Rollback** : bouton visible après chaque apply, permet de revenir à l'état précédent (bordure orange), puis de ré-appliquer si besoin
-- Note : le rollback est simulé côté frontend. La gestion réelle des snapshots système sera traitée lors de l'implémentation backend.
+Un contrôle dépourvu de `check_type` retombe sur une heuristique par mots-clés,
+conservée pour compatibilité. Les référentiels Debian et AlmaLinux sont annotés
+(respectivement 99 et 100 contrôles sur 100).
 
-La **vue comparaison de snapshots** (`/compare`) permet à l'opérateur de visualiser l'évolution de la conformité entre deux audits — typiquement avant / après remédiation. Elle s'articule en quatre sections empilées :
-- **Sélecteurs A / B** : deux pickers côte à côte permettent de choisir le système comparé. Pour l'instant chaque sélecteur charge une paire de snapshots mock (avant / après) ; plus tard ces snapshots seront versionnés en BDD par système.
-- **Bandeau de score** : deux cercles SVG côte à côte (avant / après) reliés par une flèche directionnelle (▲ vert / ▼ rouge / = gris) indiquant le delta global en points. Les chiffres s'animent à l'ouverture via un tween en `requestAnimationFrame` (ease-out quad).
-- **3 cartes de comptage** : Améliorations (vert), Régressions (rouge), Inchangés (gris). Bordure colorée selon la sémantique, grands chiffres en mono.
-- **Tableau diff** filtrable : par défaut, n'affiche que les changements (améliorations + régressions) pour la lisibilité. Filtres : *Changements / Améliorations / Régressions / Inchangés / Tout*. Colonnes ID, Titre, AVANT (StatusBadge), APRÈS (StatusBadge), Évolution (icône + label colorés).
+### Windows — agent local, résultats poussés vers le backend
 
-Le calcul de la diff vit dans un utilitaire pur `frontend/src/utils/auditDiff.js` (et non dans un store) — c'est une fonction sans état, réutilisable plus tard côté Dashboard ou Rapports. La catégorisation s'appuie sur un rang de sévérité (`pass=0, na=0, warn=1, fail=2`) qui couvre uniformément toutes les transitions, y compris `fail→warn` (amélioration) et `warn→fail` (régression).
+Windows ne se prête pas au même modèle : l'agent HardenOS est un service Windows
+qui écoute sur le port 8585 et exécute les contrôles PowerShell localement, puis
+**pousse** ses résultats vers `POST /api/agent/audit`. Le backend l'appelle pour
+déclencher un scan, exécuter un script de remédiation, rejouer un contrôle,
+sauvegarder ou restaurer — jamais pour lire des secrets.
 
-La **vue rapports** (`/reports`) présente le rapport de conformité d'un audit. On choisit une **machine** (`GET /api/systems`) puis **un de ses audits terminés** (`GET /api/audits?system_id=`), et le rapport est assemblé par le backend via **`GET /api/reports/<audit_id>`**. L'aperçu est structuré du général au détail : **synthèse** (score global `/100` via `ScoreGauge`, niveau de risque via `RiskBadge`, compteurs conformes / non conformes / avertissements / non vérifiables / total) ; **scores par domaine** (`DomainRadar` + barres) ; **non-conformités mises en avant** (chaque contrôle `fail` avec observé vs attendu et sa **recommandation de remédiation** issue du référentiel CIS) ; puis le **reste en secondaire** (conformes, avertissements, non vérifiables repliés). Accessible à **tous les rôles** (lecture) et **indépendant de l'OS** — une machine Windows produit un rapport identique à une Linux.
+L'agent télécharge son référentiel depuis le backend (`GET /api/rules/<os>`), ce
+qui garantit qu'il audite exactement les mêmes règles que celles servant au
+scoring, sans copie de fichier à maintenir sur chaque machine.
 
-Le rapport backend joint la **remédiation par contrôle** depuis le référentiel YAML du système (résolution `os_family`, mêmes règles que l'audit) et calcule les **compteurs** depuis les résultats. Trois **exports**, générés côté client dans `frontend/src/services/exportService.js` (`generateJSON`, `generateCSV`, `generateHTML`, `downloadFile`, `estimateSize`, `buildFilename` — fonctions pures) et téléchargés via `Blob` (`hardenos_<host>_<timestamp>.<ext>`) : **JSON** (structuré meta/system/audit/summary/controls), **CSV** (une ligne par contrôle) et **HTML** — un **document autonome** (styles inline, aucune dépendance à l'app) **optimisé pour l'impression** (`@media print`) et donc **convertible en PDF via « Imprimer → Enregistrer en PDF »** du navigateur. **Les trois exports incluent la recommandation de remédiation.** Il n'y a **pas de génération PDF serveur** : le HTML imprimable couvre ce besoin.
+Deux modes d'appairage, tous deux menant au même état :
 
-La **vue gestion utilisateurs** (`/users`) est **réservée aux administrateurs** et **branchée sur le backend réel** (`/api/users`, store `users.js`). Elle affiche le parc de comptes (rôle, dernière connexion, statut) avec filtres rôle / statut, et permet de : **créer** un compte (email, rôle, mot de passe initial), **modifier** un compte (rôle, email, **réinitialisation du mot de passe**), **révoquer / réactiver** (un compte révoqué ne peut plus se connecter, l'action est réversible), et **supprimer définitivement** (irréversible, confirmation via `ConfirmDialog` en bouton *danger*). Trois rôles : `admin`, `auditor`, `readonly`, matérialisés par le composant `RoleBadge`.
+- **Ajout depuis l'interface** : le backend contacte l'agent sur `:8585/setup` et
+  lui pousse `system_id`, `agent_token` et le certificat public de la CA. Si l'agent
+  ne répond pas, l'entrée créée en base est annulée — pas de machine fantôme.
+- **Auto-enregistrement** : l'agent contacte le backend au premier démarrage avec un
+  jeton d'enregistrement partagé (`X-Registration-Token`), et reçoit en retour son
+  `system_id` et son `agent_token`.
 
-Les **garde-fous de sécurité** sont appliqués côté backend et remontés fidèlement dans l'UI (message d'erreur clair en toast, sans faux « succès ») : un admin **ne peut ni se supprimer ni se révoquer lui-même**, et **le dernier administrateur actif est protégé** (impossible à supprimer, révoquer, ou rétrograder vers un rôle non-admin). Sur sa propre ligne, l'admin ne voit **aucune action** (un tag *vous* les remplace) : il gère son propre compte via l'écran « Mon compte ».
+### Mode démonstration
 
-L'écran **« Mon compte »** (`/account`) est accessible à **tous les rôles** (admin, auditor, readonly) via un clic sur son email dans la TopBar. Il affiche ses infos (email, **rôle en lecture seule**, statut) et permet de **modifier son propre email** et **son propre mot de passe** — chaque modification exigeant une **re-confirmation du mot de passe actuel** (une action sensible ne repose pas sur le seul token). Le **rôle n'y est jamais modifiable** (seuls les endpoints admin le changent), et les erreurs backend (mauvais mot de passe actuel, email déjà pris) s'affichent clairement.
+Un `StubCollector` produit un audit synthétique reproductible (paramétrable par
+`seed`) sans aucune connexion réseau. Il sert aux démonstrations et aux tests, et
+s'exécute de façon synchrone.
 
-L'accès à `/users` est gardé par le navigation guard du router : la route déclare `meta.role: 'admin'`, et toute tentative d'accès depuis un compte non-admin **redirige vers `/dashboard`** avec une notification d'erreur — l'entrée de menu « Utilisateurs » est par ailleurs **masquée** pour les non-admins. Le rendu des notifications est centralisé dans `AppLayout` (toast en bas-droite, transition fade + slide), donc toute vue peut notifier sans renderer local.
+### Statut de joignabilité
+
+L'état en ligne / hors ligne d'une machine est vérifié **à la consultation**, par
+une poignée de main TCP (port 22 pour Linux, 8585 pour Windows), sans
+authentification ni échange applicatif. Le ping ICMP a été écarté : trop souvent
+filtré, il produit des faux « hors ligne » sur des machines parfaitement joignables.
+Le port testé est aussi celui dont dépend l'audit, ce qui rend l'indicateur
+réellement prédictif.
 
 ---
 
-## Design system
+## Scoring
 
-Ambiance dark inspirée des outils SOC/SIEM industriels.
+Le score d'un domaine est le rapport entre le crédit obtenu et le poids total des
+contrôles évaluables :
 
-| Élément | Valeur |
-|---|---|
-| Fond principal | `#0d1117` |
-| Surface | `#161b22` |
-| Accent | `#00d4aa` (vert conformité) |
-| Police UI | DM Sans |
-| Police technique | JetBrains Mono |
+```
+score_domaine = Σ(crédit × poids) / Σ(poids)   ×  100
+```
 
-Toutes les valeurs sont centralisées dans `frontend/src/assets/styles/tokens.css` et utilisables via `var(--nom-token)`.
+Un contrôle conforme vaut son poids entier, un avertissement la moitié, une
+non-conformité rien. Les contrôles **non vérifiables** (`na`) sont exclus du
+numérateur *comme* du dénominateur : le score ne reflète que ce qui a pu être
+réellement mesuré, plutôt que de pénaliser une machine pour un outil manquant.
+
+Le score global agrège l'ensemble des contrôles selon la même formule, et détermine
+le niveau de risque : `low` à partir de 90, `moderate` à partir de 70, `high` à
+partir de 50, `critical` en deçà.
+
+Le statut `na` est réservé aux véritables échecs d'exécution — permission refusée
+malgré `sudo`, `sudo` en échec, dépassement de délai. Une sortie ambiguë n'y donne
+pas droit.
 
 ---
 
-## Lancer le projet (dev)
+## Remédiation, sauvegarde et retour arrière
 
-Le login étant désormais réel, il faut lancer **le backend et le frontend en parallèle** (deux terminaux).
+La remédiation applique le script du référentiel CIS aux contrôles en échec, à
+l'unité ou par lot. La chaîne est identique sur les deux OS, seul le transport
+diffère : SSH pour Linux, agent pour Windows.
 
-**Terminal 1 — backend** (port 5001 ; le port 5000 est pris par AirPlay sur macOS) :
+**Aucune remédiation ne démarre sans sauvegarde réussie.** C'est une règle
+bloquante : si la sauvegarde échoue, la remédiation est annulée et rien n'est
+modifié sur la machine — sans filet, on ne touche pas à une configuration de
+production.
+
+- Sur Linux, la sauvegarde est une archive de `/etc` créée sur la connexion SSH
+  déjà ouverte.
+- Sur Windows, l'agent exporte la politique de sécurité locale (`secedit`) et les
+  sous-clés de registre effectivement modifiées par les contrôles du référentiel.
+  L'export intégral de `HKLM\SOFTWARE` et `HKLM\SYSTEM` a été écarté après essai :
+  ces ruches contiennent des clés protégées par TrustedInstaller que `reg import`
+  refuse de restaurer, y compris sous SYSTEM.
+
+Après exécution, **chaque contrôle remédié est rejoué immédiatement** sur la même
+connexion (ou via l'agent) pour vérifier qu'il est réellement conforme. Le résultat
+du rejeu — et non le simple succès du script — décide du statut journalisé, met à
+jour l'`AuditResult` correspondant et déclenche un recalcul du score. Un script
+qui « réussit » sans corriger le contrôle est donc enregistré comme un échec.
+
+Deux niveaux de retour arrière coexistent :
+
+- **Rollback global** : restauration d'une sauvegarde entière (archive `/etc`, ou
+  `secedit` + registre). Il rend la machine à son état antérieur mais ne cible pas
+  un réglage précis. Comme il modifie la machine réelle sans toucher aux résultats
+  déjà en base, un **nouvel audit est relancé automatiquement** derrière — sans quoi
+  le score affiché resterait calculé sur des données devenues fausses.
+- **Rollback unitaire** : réexécution d'un script d'annulation capturé *avant* la
+  remédiation, qui ne défait que ce contrôle-là. Côté Windows, il couvre le registre,
+  `net accounts`, les services, `auditpol`, le pare-feu, Defender, les comptes locaux
+  et les fonctionnalités optionnelles ; `secedit` et la mise à jour des signatures
+  Defender en restent exclus, faute de mécanisme de lecture/écriture ciblée fiable.
+
+Tout passe par la table `remediation_logs` (mode, script, sortie, statut, auteur,
+horodatage). Ces journaux **survivent à la suppression de l'audit associé** — la
+clé étrangère passe à `NULL` plutôt que d'entraîner la ligne — afin de préserver la
+traçabilité.
+
+Certains contrôles CIS n'ont pas de remédiation automatisable : leur script est en
+réalité une consigne rédigée en commentaire. Plutôt que de les ignorer
+silencieusement, HardenOS les remonte comme **actions manuelles**, accompagnées de
+la condition à satisfaire.
+
+---
+
+## Sécurité
+
+**Authentification et rôles.** Accès par JWT (access token court, refresh token
+long), mots de passe hachés avec bcrypt. Trois rôles hiérarchisés : `readonly` <
+`auditor` < `admin`. La consultation est ouverte à tous les comptes ; déclencher un
+audit ou une remédiation exige `auditor` ; la gestion des utilisateurs et la
+suppression d'une machine exigent `admin`. La révocation au logout passe par une
+blocklist de `jti`.
+
+**Secrets au repos.** Les identifiants SSH sont chiffrés avec Fernet dans la colonne
+`ssh_credentials_enc` et posés par un endpoint dédié. L'API ne les renvoie jamais,
+sous aucune forme : elle n'expose que les booléens `has_credentials` et
+`has_agent_token`.
+
+**PKI interne.** Une autorité de certification locale signe le certificat serveur
+du backend (`flask issue-backend-cert`) et les certificats des agents. Chaque agent
+génère sa clé privée **sur sa propre machine** — elle n'en sort jamais — et n'envoie
+qu'une CSR. Le backend impose lui-même les SAN du certificat émis, à partir de l'IP
+réellement enregistrée en base : un agent ne peut donc pas s'attribuer l'identité
+d'un autre en la demandant dans sa CSR. Le TLS sert ici au chiffrement du transport ;
+l'authentification applicative reste portée par les tokens.
+
+**Signature des scripts.** Les scripts de remédiation envoyés aux agents Windows
+sont signés en Ed25519 par une clé **distincte de la CA TLS** (`flask
+issue-signing-key`) — compromettre l'une n'entame pas l'autre. L'agent vérifie la
+signature avec la clé publique reçue du backend **avant même d'écrire le script sur
+disque** : un script non signé, ou dont la signature ne correspond pas, est rejeté
+sans jamais être exécuté.
+
+Enfin, la garde des comptes est appliquée côté serveur et non dans l'interface : un
+administrateur ne peut ni se supprimer ni se révoquer lui-même, et le dernier
+administrateur actif est protégé contre la suppression, la révocation et la
+rétrogradation.
+
+---
+
+## Rapports et comparaison d'audits
+
+Le **rapport de conformité** (`GET /api/reports/<audit_id>`) est assemblé côté
+backend : identité de la machine, synthèse (score global, niveau de risque,
+compteurs), scores par domaine, et détail des contrôles enrichi de la recommandation
+de remédiation, jointe depuis le référentiel YAML par `control_id`. Il est lisible
+par tous les rôles.
+
+L'interface le présente du général au particulier — synthèse, radar des six
+domaines, non-conformités mises en avant avec valeur observée face à la valeur
+attendue, puis le reste replié. Trois exports sont produits côté client : **JSON**
+(structuré), **CSV** (une ligne par contrôle) et **HTML** — un document autonome,
+sans dépendance à l'application, dont la feuille de style d'impression permet
+d'obtenir un PDF via « Imprimer → Enregistrer en PDF ». Il n'y a délibérément pas de
+génération PDF serveur : le HTML imprimable couvre ce besoin sans ajouter de
+dépendance. Les trois exports embarquent la remédiation.
+
+La **comparaison d'audits** (`GET /api/comparison`) met deux audits terminés face à
+face : delta du score global, évolution par domaine, et diff contrôle par contrôle.
+La catégorisation repose sur un rang de sévérité (`pass` et `na` = 0, `warn` = 1,
+`fail` = 2) qui couvre uniformément toutes les transitions, y compris les cas
+intermédiaires comme `fail → warn` (amélioration) ou `warn → fail` (régression). Ce
+même rang est appliqué côté frontend, dans `utils/auditDiff.js`, afin que les deux
+implémentations ne puissent pas diverger.
+
+---
+
+## Interface
+
+Application Vue 3 en Composition API, organisée autour d'un `AppLayout` (sidebar de
+navigation, barre supérieure, zone de contenu). Toutes les routes protégées en sont
+enfants ; seul `/login` vit à la racine.
+
+L'authentification est réellement branchée sur le backend. L'intercepteur de requête
+axios ajoute l'access token à chaque appel ; l'intercepteur de réponse, sur un `401`,
+tente **un** refresh puis rejoue la requête — et déconnecte proprement si le refresh
+échoue. Le logout révoque le token côté serveur, puis nettoie l'état local même si
+l'appel réseau a échoué.
+
+Les vues couvrent le tableau de bord (KPI du parc, filtres), le détail d'une machine,
+la remédiation, la comparaison d'audits, les rapports, la gestion des utilisateurs
+(réservée aux administrateurs, avec les garde-fous décrits plus haut) et l'écran
+« Mon compte », accessible à tous les rôles, où chacun modifie son email et son mot
+de passe — chaque changement exigeant une **re-confirmation du mot de passe actuel**,
+parce qu'une action sensible ne doit pas reposer sur la seule possession d'un token.
+Le rôle n'y est jamais modifiable.
+
+Côté style, tout passe par des tokens sémantiques (`assets/styles/tokens.css`) :
+aucune couleur n'est codée en dur dans un composant. Deux thèmes partagent la même
+identité — bleu de marque, ambre d'action, conventions de couleur pour les statuts —
+et ne diffèrent que par la clarté des fonds. Le thème sombre est le défaut ; le choix
+vit en `sessionStorage` et se réinitialise à la déconnexion. Typographies : Space
+Grotesk pour l'interface, JetBrains Mono pour les valeurs techniques.
+
+---
+
+## API HTTP
+
+Toutes les routes de l'API applicative exigent un access token, sauf le login et le
+health check. Les routes de l'agent s'authentifient, elles, par `X-Agent-Token`.
+
+| Préfixe | Rôle minimal | Contenu |
+|---|---|---|
+| `/api/health` | — | Disponibilité de l'API |
+| `/api/auth` | — / authentifié | `login`, `refresh`, `logout`, `me` |
+| `/api/systems` | `readonly` (lecture), `auditor` (écriture), `admin` (suppression) | Parc de machines, credentials SSH, test de joignabilité |
+| `/api/cis-rules/available` | authentifié | Familles et OS auditables, dérivés des YAML présents |
+| `/api/audits` | `readonly` (lecture), `auditor` (déclenchement) | Déclenchement, détail, historique |
+| `/api/reports/<audit_id>` | `readonly` | Rapport de conformité assemblé |
+| `/api/comparison` | `readonly` | Diff de deux audits |
+| `/api/users` | `admin` | Création, modification, révocation, suppression |
+| `/api/account` | authentifié | Email et mot de passe de son propre compte |
+| `/api/agent/*` | token d'agent, ou `auditor` selon la route | Enrôlement, certificat, ingestion d'audit, remédiation, sauvegardes, rollback |
+| `/api/rules/<os>` | token d'agent | Distribution du référentiel CIS à l'agent |
+
+Le détail des corps de requête et des codes de retour est documenté dans
+[`backend/README.md`](backend/README.md).
+
+---
+
+## Structure du dépôt
+
+```
+HardenOS/
+├── frontend/                   Application Vue 3 (Vite)
+│   └── src/
+│       ├── api/                Couche axios : client + intercepteurs JWT, un module par ressource
+│       ├── stores/             Pinia (auth, systems, audits, users, comparison, ui)
+│       ├── views/              Login, Dashboard, SystemDetail, Audit, Remediation, Compare, Reports, Users, Account
+│       ├── components/         layout, charts, audit, system, icons, common
+│       ├── services/           exportService.js — génération JSON / CSV / HTML autonome
+│       ├── utils/              auditDiff.js — diff de deux audits (fonction pure)
+│       └── assets/styles/      tokens.css, reset.css, global.css
+│
+├── backend/                    API Flask (MVC)
+│   ├── app/
+│   │   ├── controllers/        Blueprints : health, auth, systems, audits, cis_rules, agents, users, account, comparison, reports
+│   │   ├── models/             SQLAlchemy : User, System, Audit, AuditResult, Snapshot, RemediationLog
+│   │   ├── services/           Logique métier
+│   │   │   ├── audit_engine.py     Scoring pondéré, niveau de risque, recalcul post-remédiation
+│   │   │   ├── audit_service.py    Orchestration : credentials, choix du collecteur, exécution asynchrone
+│   │   │   ├── rules_loader.py     Chargement, cache et résolution des référentiels YAML
+│   │   │   ├── agent_ingest.py     Réception et validation des audits poussés par un agent
+│   │   │   ├── reachability.py     Test TCP de joignabilité (22 / 8585)
+│   │   │   ├── comparison.py       Diff de deux audits
+│   │   │   ├── reports.py          Assemblage du rapport + jointure de la remédiation
+│   │   │   └── collectors/         BaseCollector, SSHCollector (Paramiko), StubCollector
+│   │   ├── utils/
+│   │   │   ├── crypto.py           Chiffrement Fernet
+│   │   │   ├── pki.py              CA interne, émission de certificats, signature Ed25519
+│   │   │   ├── jwt.py              JWTManager + blocklist des tokens révoqués
+│   │   │   ├── auth.py             Décorateur role_required (hiérarchie des rôles)
+│   │   │   └── ssh_credentials.py  (Dé)chiffrement du couple utilisateur / mot de passe SSH
+│   │   ├── cli.py              create-admin, issue-backend-cert, issue-signing-key
+│   │   └── config.py           Configurations dev / prod / test
+│   ├── cis_rules/              debian13.yaml, almalinux10.yaml, windows_server2022.yaml
+│   └── migrations/             Alembic
+│
+└── agent/                      Agent Windows (service, port 8585)
+    ├── hardenos_agent.py       Serveur HTTP(S), bascule TLS à chaud, service pywin32
+    ├── collector.py            Exécution des contrôles PowerShell et évaluation
+    ├── remediate.py            Vérification de signature Ed25519 puis exécution
+    ├── backup.py               Sauvegarde secedit + registre
+    ├── undo.py                 Capture du script d'annulation ciblé
+    ├── tls.py                  Clé privée locale, CSR, certificat
+    └── register.py             Enrôlement et récupération du certificat
+```
+
+---
+
+## Installation
+
+### Backend
+
+Prérequis : Python 3.11 et un accès réseau à PostgreSQL 16.
+
 ```bash
 cd backend
+python3.11 -m venv venv
 source venv/bin/activate
-python wsgi.py
-# → http://localhost:5001
-```
-Voir [`backend/README.md`](backend/README.md) pour l'installation et la création du premier admin (`flask create-admin`).
+pip install -r requirements.txt
 
-**Terminal 2 — frontend** :
+cp .env.example .env
+```
+
+Renseigner ensuite le `.env` : identifiants PostgreSQL, `SECRET_KEY`,
+`JWT_SECRET_KEY` et `FERNET_KEY`. Les deux premières se génèrent avec
+`python -c "import secrets; print(secrets.token_hex(32))"`, la troisième avec
+`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+Sans `FERNET_KEY`, l'enregistrement d'identifiants SSH échoue.
+
+Appliquer les migrations, créer le premier administrateur, puis démarrer :
+
+```bash
+flask --app wsgi db upgrade
+flask --app wsgi create-admin
+python wsgi.py          # http://localhost:5001
+```
+
+Le port 5001 est retenu parce que le 5000 est occupé par AirPlay sur macOS. Le
+serveur passe automatiquement en HTTPS si `BACKEND_TLS_CERT` et `BACKEND_TLS_KEY`
+pointent vers des fichiers existants, et reste en HTTP sinon — un clone neuf
+fonctionne donc sans certificat.
+
+### Frontend
+
 ```bash
 cd frontend
 npm install
 cp .env.example .env
-npm run dev
-# → http://localhost:5173
+npm run dev             # http://localhost:5173
 ```
 
-Le proxy Vite redirige `/api` vers `http://localhost:5001`. L'application redirige automatiquement vers `/login` ; il faut s'authentifier avec un compte réel créé dans le backend.
+Le proxy Vite redirige `/api` vers le backend. L'application redirige vers `/login` :
+il faut s'authentifier avec un compte réellement créé côté backend.
+
+### PKI (pour les agents Windows)
+
+Une fois la CA en place (`AGENT_CA_KEY` / `AGENT_CA_CERT`), deux commandes à
+exécuter une seule fois :
+
+```bash
+flask --app wsgi issue-backend-cert --san <ip-ou-hostname-du-backend>
+flask --app wsgi issue-signing-key
+```
+
+La première émet le certificat serveur HTTPS du backend, la seconde la clé de
+signature des scripts de remédiation. La clé publique correspondante est ensuite
+distribuée automatiquement aux agents ; il n'y a aucun fichier à copier à la main.
+
+### Agent Windows
+
+Sur la machine cible, en tant qu'administrateur :
+
+```bat
+copy agent.conf.example agent.conf
+:: renseigner backend_url, puis :
+install.bat
+```
+
+Le script installe les dépendances, enregistre le service `HardenOSAgent` et le
+démarre. `system_id` et `agent_token` sont remplis automatiquement, soit par le
+backend lors de l'ajout de la machine depuis l'interface, soit par
+l'auto-enregistrement si un `registration_token` est fourni.
 
 ---
 
-## Roadmap
+## Limites connues
 
-- [x] Initialisation structure frontend Vue.js
-- [x] Design system & tokens CSS
-- [x] Stores Pinia avec données mock
-- [x] Navigation guards & routing
-- [x] Composants de layout (Sidebar, TopBar, AppLayout)
-- [x] Vue Login fonctionnelle (mock auth)
-- [x] Vue Dashboard avec KPI et liste systèmes
-- [x] Composants atomiques (RiskBadge, SystemCard, StatusBadge, DomainBar)
-- [x] Vue détail système (infos réelles ; radar des 6 domaines et tableau CIS prêts, en attente des données d'audit)
-- [x] Vue remédiation (dry-run, apply, rollback, warning précautions)
-- [x] Vue comparaison de snapshots (diff statuts, score animé, filtres)
-- [x] Vue rapports — aperçu structuré (synthèse, domaines, non-conformités + remédiation) sur audits réels
-- [x] Vue gestion utilisateurs (CRUD, rôles, garde admin, toast global)
-- [x] Backend — gestion utilisateurs admin (`/api/users` : lister, créer, modifier rôle/email/mot de passe, révoquer/réactiver, supprimer) avec garde-fous (pas d'auto-suppression, protection du dernier admin actif)
-- [x] Backend — self-service « Mon compte » (`/api/account` : email + mot de passe avec re-confirmation ; rôle non modifiable)
-- [x] Intégration frontend gestion utilisateurs ↔ backend (page Utilisateurs réservée aux admins + écran « Mon compte » pour tous)
-- [x] Backend — socle MVC (Flask + SQLAlchemy + Alembic + connexion PostgreSQL)
-- [x] Backend — authentification JWT (access/refresh, bcrypt, rôles, CLI admin)
-- [x] Backend — CRUD systèmes (gestion du parc, credentials SSH chiffrés Fernet)
-- [x] Référentiels CIS — 300 contrôles YAML (Debian 13, AlmaLinux 10, Windows Server 2022)
-- [x] Backend — moteur d'audit + scoring CIS (6 domaines, niveau de risque)
-- [x] Scan Linux réel via SSH (Paramiko, lecture seule, sudo optionnel, async)
-- [x] Classification déclarative `check_type` — Debian 13 et AlmaLinux 10 annotés
-- [x] Scan Windows (Server 2022, WinRM)
-- [ ] Authentification SSH par clé (en plus du mot de passe)
-- [ ] Backend — remédiation (dry-run / apply, logs de traçabilité)
-- [x] Intégration auth frontend ↔ backend (login réel, gestion JWT access/refresh)
-- [x] Intégration affichage systèmes frontend ↔ backend ( Dashboard + détail)
-- [x] Intégration CRUD systèmes côté frontend (création / édition / suppression depuis l'UI)
-- [x] Intégration des données d'audit frontend ↔ backend (audits, rapports)
-- [x] Backend — assemblage du rapport d'un audit (`/api/reports` : synthèse, compteurs, contrôles + remédiation jointe au référentiel CIS)
-- [x] Exports de rapport JSON / CSV / HTML autonome imprimable (PDF via impression navigateur ; pas de génération PDF serveur)
-- [ ] Humanisation visuelle (status bar, densité, raffinements)
-- [ ] Déploiement air-gapped
+- **Blocklist des tokens en mémoire.** La révocation au logout s'appuie sur un `set`
+  Python : elle est perdue au redémarrage et n'est pas partagée entre plusieurs
+  workers. Suffisant en développement, à remplacer par Redis ou une table en base
+  avant une mise en production.
+- **SSH par mot de passe uniquement.** L'authentification par clé privée n'est pas
+  encore prise en charge.
+- **Contrôles « presence-as-configured ».** Quelques contrôles vérifient aujourd'hui
+  qu'un réglage existe, sans encore comparer sa valeur exacte.
+- **Rollback global non ciblé.** La restauration d'une sauvegarde rend toute la zone
+  sauvegardée à son état antérieur, et pas seulement le contrôle concerné. Le rollback
+  unitaire couvre ce besoin, mais pas sur toutes les familles de contrôles.
+- **Agent Windows en anglais.** Les valeurs renvoyées par `auditpol` sont comparées à
+  du texte anglais : la machine doit être en langue d'affichage anglaise.
+- **Sauvegarde Windows partielle par conception.** Seules les sous-clés de registre
+  réellement modifiées par le référentiel sont exportées (voir plus haut).
+
+---
+
+## Feuille de route
+
+Réalisé :
+
+- Socle backend MVC, PostgreSQL, migrations Alembic
+- Authentification JWT, rôles hiérarchisés, gestion des utilisateurs et self-service
+- CRUD du parc, chiffrement Fernet des identifiants SSH
+- 300 contrôles CIS en YAML, chargeur et catalogue de familles dynamique
+- Moteur d'audit et scoring pondéré sur six domaines
+- Scanner SSH Linux (lecture seule, sudo optionnel, asynchrone)
+- Agent Windows : collecte, enrôlement, ingestion des résultats
+- PKI interne : HTTPS backend et agents, signature Ed25519 des scripts
+- Remédiation unitaire et groupée sur les deux OS, avec rejeu et journalisation
+- Sauvegarde bloquante avant remédiation, rollback global et unitaire
+- Rapports de conformité et exports JSON / CSV / HTML
+- Comparaison de deux audits
+
+À venir :
+
+- Authentification SSH par clé privée
+- Annotation `check_type` du référentiel Windows
+- Blocklist de tokens persistante
+- Déploiement air-gapped
+
